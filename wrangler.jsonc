@@ -1,0 +1,23 @@
+{
+  "name": "fitness",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+
+  // Seite und Skripte. Der Worker läuft zuerst, damit nur Angemeldete die App sehen.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fitness-db",
+      "database_id": "dd074717-3df8-4af5-b23c-73141f356b80"
+    }
+  ],
+
+  // Nur Fehlerzählung, keine Inhalte: Anfragen werden nicht mitgeschrieben (Gesundheitsdaten)
+  "observability": { "enabled": false }
+}
