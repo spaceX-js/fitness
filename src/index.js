@@ -6,6 +6,7 @@ import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, random
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 
 const COOKIE = "__Host-fit";
+const VERSION = "0.3.1";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -18,7 +19,8 @@ export default {
       if (!env.DB) return text("Einrichtung unvollständig: Die Datenbank-Verbindung „DB“ fehlt.", 500);
       const url = new URL(request.url);
       const path = url.pathname;
-      if (PUBLIC.has(path)) return withHeaders(await env.ASSETS.fetch(request), { "Cache-Control": "public, max-age=3600", ...SEC });
+      // CSS immer frisch prüfen (sonst zeigt das iPhone nach einem Update bis zu einer Stunde die alte Gestaltung); Icons dürfen zwischengespeichert werden
+      if (PUBLIC.has(path)) return withHeaders(await env.ASSETS.fetch(request), { "Cache-Control": path === "/style.css" || path === "/manifest.webmanifest" ? "no-cache" : "public, max-age=86400", ...SEC });
 
       // Formulare und API nur von der eigenen Seite (Schutz gegen fremde Seiten, die im Namen des Browsers Anfragen stellen)
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -47,6 +49,10 @@ export default {
         return new Response(null, { status: 302, headers: { Location: "/" } });
       }
       const res = await env.ASSETS.fetch(path === "/index.html" ? new Request(new URL("/", url), request) : request);
+      if ((path === "/" || path === "/index.html") && res.ok) {
+        const html0 = (await res.text()).replaceAll("__V__", VERSION);
+        return new Response(html0, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", ...SEC } });
+      }
       return withHeaders(res, { "Cache-Control": "no-cache", ...SEC });
     } catch (e) {
       return json({ error: "Serverfehler." }, 500);   // keine Details nach außen
@@ -384,7 +390,8 @@ function page(title, body) {
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Fitness"><meta name="robots" content="noindex, nofollow">
 <link rel="apple-touch-icon" href="/icon.png"><link rel="icon" href="/icon.png"><link rel="manifest" href="/manifest.webmanifest">
-<link rel="stylesheet" href="/style.css"><title>Fitness – ${esc(title)}</title></head>
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#f3f4f6" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="/style.css?v=${VERSION}"><title>Fitness – ${esc(title)}</title></head>
 <body class="auth"><main class="authbox"><img src="/icon.png" alt="" class="logo">${body}</main></body></html>`;
 }
 function loginForm(fehler) {

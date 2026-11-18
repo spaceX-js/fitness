@@ -26,6 +26,8 @@ const tooWide = [];
 const shot = async (name, full = false) => {
   const w = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, ...[...document.querySelectorAll(".sheet")].map(s => s.scrollWidth)));
   if (w > 390) tooWide.push(name + " (" + w + " px)");
+  const bad = await page.evaluate(() => [...document.querySelectorAll("button,a,input,.chip")].filter(el => { const r = el.getBoundingClientRect(); return r.width && r.right > window.innerWidth + 1; }).map(el => el.textContent.trim().slice(0, 20)));
+  if (bad.length) tooWide.push(name + ": " + bad.join(" / "));
   return page.screenshot({ path: `${out}/${name}.png`, fullPage: full });
 };
 

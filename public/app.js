@@ -851,7 +851,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.3.0</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.3.1</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
