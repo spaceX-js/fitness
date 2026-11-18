@@ -27,3 +27,21 @@ CREATE TABLE IF NOT EXISTS logs (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS logs_date ON logs(date);
+
+-- Trainingspläne mit Versionen. family = ein Plan über alle Versionen; status: active (aktuelle Version),
+-- old (frühere Version), archived (abgelöster Plan), draft (Vorschlag, noch nicht angewendet), discarded
+CREATE TABLE IF NOT EXISTS plans (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  family      TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  version     INTEGER NOT NULL,
+  status      TEXT NOT NULL,
+  data        TEXT NOT NULL,
+  changes     TEXT NOT NULL DEFAULT '[]',
+  note        TEXT NOT NULL DEFAULT '',
+  start       TEXT,
+  created_at  TEXT NOT NULL,
+  applied_at  TEXT,
+  archived_at TEXT
+);
+CREATE INDEX IF NOT EXISTS plans_status ON plans(status);

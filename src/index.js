@@ -3,6 +3,7 @@
 // Sicherheit: Passwort (PBKDF2) + Zwei-Faktor-Code (TOTP), Sitzungen nur als Hash in der Datenbank,
 // strenge Content-Security-Policy, Sperre nach Fehlversuchen. Ohne Anmeldung ist außer Login, Icon und CSS nichts erreichbar.
 import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, randomCode, safeEqual } from "./auth.js";
+import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 
 const COOKIE = "__Host-fit";
 const SESSION_DAYS = 30;
@@ -59,13 +60,75 @@ async function api(request, env, settings, url, session) {
 
   if (path === "/api/state" && method === "GET") {
     const since = isDate(url.searchParams.get("since")) ? url.searchParams.get("since") : "0000-00-00";
+    const plan = await activePlan(env, settings);
     const { results } = await env.DB.prepare("SELECT id, date, kind, status, data, updated_at FROM logs WHERE date >= ? ORDER BY date").bind(since).all();
+    const plans = (await env.DB.prepare("SELECT id, family, name, version, status, changes, note, start, created_at, applied_at, archived_at FROM plans WHERE status <> 'discarded' ORDER BY id DESC").all()).results
+      .map(p => ({ id: p.id, family: p.family, name: p.name, version: p.version, status: p.status, changes: parseArr(p.changes), note: p.note || "", start: p.start,
+        createdAt: p.created_at, appliedAt: p.applied_at, archivedAt: p.archived_at }));
     return json({
-      start: settings.plan_start ? mondayOf(settings.plan_start) : mondayOf(new Date().toISOString().slice(0, 10)),
-      overrides: parseObj(settings.overrides), status: parseObj(settings.status), decisions: parseObj(settings.decisions),
+      start: plan.start, plan: planOut(plan), plans,
+      overrides: parseObj(settings.overrides), status: parseObj(settings.status), decisions: parseObj(settings.decisions), planner: parseObj(settings.planner),
       logs: results.map(r => ({ id: r.id, date: r.date, kind: r.kind, status: r.status, data: parseObj(r.data), updatedAt: r.updated_at })),
       sessions: Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE expires_at > ?").bind(new Date().toISOString()).first()).n)
     });
+  }
+
+  /* --- Pläne: Versionen, Archiv, Entwürfe --- */
+  if (path === "/api/plan" && method === "GET") {
+    const id = Number(url.searchParams.get("id"));
+    const row = Number.isInteger(id) ? await env.DB.prepare("SELECT * FROM plans WHERE id = ?").bind(id).first() : null;
+    if (!row) return json({ error: "Plan nicht gefunden." }, 404);
+    return json(planOut(row));
+  }
+  if (path === "/api/plan/save" && method === "POST") {      // Änderungen am aktiven Plan → neue Version
+    const b = await readJson(request, 120000);
+    const cur = await activePlan(env, settings);
+    const v = validatePlan(b && b.data);
+    if (v.error) return json({ error: v.error }, 400);
+    const changes = diffPlans(parseObj(cur.data), v.plan);
+    if (!changes.length) return json({ error: "Keine Änderungen." }, 400);
+    const row = await newVersion(env, cur, v.plan, changes, typeof b.note === "string" ? b.note.slice(0, 200) : "");
+    return json({ ok: true, plan: planOut(row) });
+  }
+  if (path === "/api/plan/restore" && method === "POST") {   // ältere Version wieder aktiv machen (als neue Version)
+    const b = await readJson(request, 1000);
+    const cur = await activePlan(env, settings);
+    const old = await env.DB.prepare("SELECT * FROM plans WHERE id = ? AND family = ?").bind(Number(b && b.id), cur.family).first();
+    if (!old) return json({ error: "Version nicht gefunden." }, 404);
+    const v = validatePlan(parseObj(old.data));
+    if (v.error) return json({ error: v.error }, 400);
+    const changes = ["Wiederhergestellt aus Version " + old.version, ...diffPlans(parseObj(cur.data), v.plan)];
+    const row = await newVersion(env, cur, v.plan, changes, "");
+    return json({ ok: true, plan: planOut(row) });
+  }
+  if (path === "/api/plan/apply" && method === "POST") {     // Entwurf oder archivierten Plan anwenden; aktueller Plan → Archiv
+    const b = await readJson(request, 1000);
+    if (!b || !isDate(b.start)) return json({ error: "Bitte ein Startdatum wählen." }, 400);
+    const row = await env.DB.prepare("SELECT * FROM plans WHERE id = ? AND status IN ('draft', 'archived')").bind(Number(b.id)).first();
+    if (!row) return json({ error: "Plan nicht gefunden." }, 404);
+    const v = validatePlan(parseObj(row.data));
+    if (v.error) return json({ error: "Der Plan ist fehlerhaft: " + v.error }, 400);
+    const cur = await activePlan(env, settings);
+    const now = new Date().toISOString(), start = mondayOf(b.start), ov = parseObj(settings.overrides);
+    delete ov.deload;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE plans SET status = 'archived', archived_at = ? WHERE id = ?").bind(now, cur.id),
+      env.DB.prepare("UPDATE plans SET status = 'active', start = ?, applied_at = ?, archived_at = NULL, data = ? WHERE id = ?").bind(start, now, JSON.stringify(v.plan), row.id),
+      setSetting(env, "plan_start", start), setSetting(env, "overrides", JSON.stringify(ov))
+    ]);
+    return json({ ok: true });
+  }
+  if (path === "/api/plan/discard" && method === "POST") {
+    const b = await readJson(request, 1000);
+    await env.DB.prepare("UPDATE plans SET status = 'discarded' WHERE id = ? AND status = 'draft'").bind(Number(b && b.id)).run();
+    return json({ ok: true });
+  }
+  if (path === "/api/planner" && method === "POST") {        // Fragebogen für einen neuen Plan
+    const b = await readJson(request, 20000);
+    const answers = cleanJson(b && b.answers, 0);
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) return json({ error: "Ungültige Angaben." }, 400);
+    await env.DB.batch([setSetting(env, "planner", JSON.stringify({ answers, at: new Date().toISOString(), status: "offen" }))]);
+    return json({ ok: true });
   }
 
   if (path === "/api/log" && method === "POST") {
@@ -90,7 +153,9 @@ async function api(request, env, settings, url, session) {
     const b = await readJson(request, 64000);
     if (!b || typeof b !== "object") return json({ error: "Ungültige Anfrage." }, 400);
     const ops = [];
-    if ("start" in b) { if (!isDate(b.start)) return json({ error: "Ungültiges Datum." }, 400); ops.push(setSetting(env, "plan_start", mondayOf(b.start))); }
+    if ("start" in b) { if (!isDate(b.start)) return json({ error: "Ungültiges Datum." }, 400);
+      const cur = await activePlan(env, settings);
+      ops.push(setSetting(env, "plan_start", mondayOf(b.start)), env.DB.prepare("UPDATE plans SET start = ? WHERE id = ?").bind(mondayOf(b.start), cur.id)); }
     for (const k of ["overrides", "status", "decisions"]) {
       if (!(k in b)) continue;
       const clean = cleanJson(b[k], 0);
@@ -106,7 +171,8 @@ async function api(request, env, settings, url, session) {
 
   if (path === "/api/export" && method === "GET") {
     const { results } = await env.DB.prepare("SELECT id, date, kind, status, data, updated_at FROM logs ORDER BY date").all();
-    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, overrides: parseObj(settings.overrides), status: parseObj(settings.status),
+    const plans = (await env.DB.prepare("SELECT * FROM plans WHERE status <> 'discarded' ORDER BY id").all()).results.map(planOut);
+    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, plans, overrides: parseObj(settings.overrides), status: parseObj(settings.status),
       logs: results.map(r => ({ ...r, data: parseObj(r.data) })) };
     return new Response(JSON.stringify(out, null, 1), { headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="fitness-export-${out.exportedAt.slice(0, 10)}.json"`, "Cache-Control": "no-store", ...SEC } });
   }
@@ -156,6 +222,31 @@ export function cleanJson(v, depth) {
   }
   return undefined;
 }
+/* ---------- Pläne ---------- */
+// Aktiver Plan; gibt es noch keinen (erste Version), wird der Standardplan als Version 1 angelegt.
+async function activePlan(env, settings) {
+  let row = await env.DB.prepare("SELECT * FROM plans WHERE status = 'active' ORDER BY id DESC LIMIT 1").first();
+  if (row) return row;
+  const now = new Date().toISOString(), start = settings.plan_start ? mondayOf(settings.plan_start) : mondayOf(now.slice(0, 10));
+  await env.DB.prepare("INSERT INTO plans (family, name, version, status, data, changes, note, start, created_at, applied_at) VALUES (?, ?, 1, 'active', ?, ?, '', ?, ?, ?)")
+    .bind(randomHex(8), DEFAULT_PLAN.name, JSON.stringify(DEFAULT_PLAN), JSON.stringify(["Erste Version (Trainingsplan-Bild)"]), start, now, now).run();
+  return await env.DB.prepare("SELECT * FROM plans WHERE status = 'active' ORDER BY id DESC LIMIT 1").first();
+}
+async function newVersion(env, cur, data, changes, note) {
+  const now = new Date().toISOString();
+  const max = await env.DB.prepare("SELECT MAX(version) AS v FROM plans WHERE family = ?").bind(cur.family).first();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE plans SET status = 'old' WHERE id = ?").bind(cur.id),
+    env.DB.prepare("INSERT INTO plans (family, name, version, status, data, changes, note, start, created_at, applied_at) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)")
+      .bind(cur.family, data.name, (max && max.v || cur.version) + 1, JSON.stringify(data), JSON.stringify(changes.slice(0, 60)), note, cur.start, now, now)
+  ]);
+  return await env.DB.prepare("SELECT * FROM plans WHERE status = 'active' ORDER BY id DESC LIMIT 1").first();
+}
+function planOut(r) {
+  return { id: r.id, family: r.family, name: r.name, version: r.version, status: r.status, start: r.start, note: r.note || "", changes: parseArr(r.changes),
+    createdAt: r.created_at, appliedAt: r.applied_at, archivedAt: r.archived_at, data: parseObj(r.data) };
+}
+function parseArr(s) { try { const a = JSON.parse(s || "[]"); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
 function parseObj(s) { try { const o = JSON.parse(s || "{}"); return o && typeof o === "object" ? o : {}; } catch (e) { return {}; } }
 export function mondayOf(iso) { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); }
 

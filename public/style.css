@@ -101,3 +101,11 @@ body.auth main.authbox{max-width:400px;margin:0 auto;padding:calc(env(safe-area-
 svg.fig .f,svg.fig .b{fill:none;stroke:var(--ink);stroke-width:7;stroke-linecap:round;stroke-linejoin:round}svg.fig .b{opacity:.32}
 svg.fig .h{fill:var(--ink)}svg.fig .g{fill:none;stroke:var(--mute);stroke-width:4;stroke-linecap:round}svg.fig .t{stroke-width:2}svg.fig .r{stroke-width:2.5}
 svg.fig .w4{stroke-width:4}svg.fig .w5{stroke-width:5}svg.fig .w8{stroke-width:8}svg.fig .d{fill:var(--acc)}
+
+/* v0.2: Optionen, Auswahl, Bearbeiten */
+.more{width:36px;height:36px;flex:none;border-radius:10px;border:0;background:var(--bg);color:var(--ink);font-size:18px;cursor:pointer;line-height:1}
+.more:disabled{opacity:.3}
+.ex.skipped{opacity:.6}
+.pick{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.pick .thumb{width:56px;height:45px;flex:none;border-radius:10px;background:var(--bg)}
+input[type=search]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-size:16px;-webkit-appearance:none;appearance:none}

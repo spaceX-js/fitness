@@ -153,3 +153,55 @@ test("cleanJson und checkLog", () => {
   assert.deepEqual(cleanJson({ a: [1, "x", { b: NaN }], "bad key": 1 }, 0), { a: [1, "x", {}] });
   assert.equal(checkLog({ id: "2026-11-17-gym", date: "2026-11-17", kind: "strength", status: "done", data: [] }), null);
 });
+
+test("Pläne: Version 1 automatisch, neue Version, wiederherstellen", async () => {
+  const { env, cookie } = await setupDone();
+  const get = async () => (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  let st = await get();
+  assert.equal(st.plan.version, 1);
+  assert.equal(st.plan.data.workouts.gym.items[5].sets, 2);
+  const d = JSON.parse(JSON.stringify(st.plan.data));
+  d.workouts.gym.items[5].sets = 3;
+  assert.equal((await post(env, cookie, "/api/plan/save", { data: st.plan.data })).status, 400, "ohne Änderung keine neue Version");
+  let r = await post(env, cookie, "/api/plan/save", { data: d, note: "mehr Schulter" });
+  assert.equal(r.status, 200);
+  st = await get();
+  assert.equal(st.plan.version, 2);
+  assert.deepEqual(st.plan.changes, ["Schulterdrücken: 2 → 3 Sätze"]);
+  assert.equal(st.plans.length, 2);
+  r = await post(env, cookie, "/api/plan/restore", { id: st.plans.find(p => p.version === 1).id });
+  st = await get();
+  assert.equal(st.plan.version, 3);
+  assert.equal(st.plan.data.workouts.gym.items[5].sets, 2);
+  const bad = JSON.parse(JSON.stringify(d)); bad.workouts.gym.items[0].id = "<script>";
+  assert.equal((await post(env, cookie, "/api/plan/save", { data: bad })).status, 400);
+});
+
+test("Pläne: Entwurf anwenden archiviert den alten, Archiv wieder aktivieren", async () => {
+  const { env, cookie } = await setupDone();
+  const get = async () => (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  const st0 = await get();
+  const draft = JSON.parse(JSON.stringify(st0.plan.data)); draft.name = "Phase 3"; draft.weeks = 6;
+  env.DB.raw.prepare("INSERT INTO plans (family, name, version, status, data, changes, note, created_at) VALUES ('neu', 'Phase 3', 1, 'draft', ?, '[]', 'Vorschlag', ?)").run(JSON.stringify(draft), new Date().toISOString());
+  let st = await get();
+  const dr = st.plans.find(p => p.status === "draft");
+  assert.equal((await post(env, cookie, "/api/plan/apply", { id: dr.id })).status, 400, "Startdatum nötig");
+  assert.equal((await post(env, cookie, "/api/plan/apply", { id: dr.id, start: "2026-11-25" })).status, 200);
+  st = await get();
+  assert.equal(st.plan.name, "Phase 3");
+  assert.equal(st.start, "2026-11-23");
+  const arch = st.plans.find(p => p.status === "archived");
+  assert.equal(arch.name, "Phase 2");
+  assert.equal((await post(env, cookie, "/api/plan/apply", { id: arch.id, start: "2026-11-30" })).status, 200);
+  st = await get();
+  assert.equal(st.plan.name, "Phase 2");
+  assert.equal(st.plans.find(p => p.status === "archived").name, "Phase 3");
+});
+
+test("Planer speichert Angaben", async () => {
+  const { env, cookie } = await setupDone();
+  assert.equal((await post(env, cookie, "/api/planner", { answers: { goals: ["Muskelaufbau"], weeks: "8", other: "Halbmarathon im April" } })).status, 200);
+  const st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal(st.planner.status, "offen");
+  assert.deepEqual(st.planner.answers.goals, ["Muskelaufbau"]);
+});

@@ -1,12 +1,12 @@
 // Fitness – Oberfläche. Läuft nur nach Anmeldung; Daten kommen von /api (Cloudflare Worker + D1).
-import { EXERCISES, WORKOUTS, WEEK, DAY_NAMES, REGIONS, ZONES, MOBILITY, PROFILE, weekOf, dayIndex } from "./plan.js";
+import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
 import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK } from "./coach.js";
 import { mount, still } from "./anim.js";
 
 const $app = document.getElementById("app"), $rest = document.getElementById("rest");
 const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-const KIND_LABEL = { strength: "Kraft", run: "Laufen", recovery: "Erholung" };
+const KIND_LABEL = { strength: "Kraft", run: "Laufen", recovery: "Erholung", rest: "Ruhetag" };
 let S = null;                 // Daten vom Server
 let stops = [];               // laufende Animationen
 let ui = { planWeek: null, open: null };
@@ -44,11 +44,11 @@ document.addEventListener("visibilitychange", () => {
 /* ---------- Hilfen ---------- */
 function todayIso() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function longDate(iso) { const [y, m, d] = iso.split("-").map(Number); return DAY_NAMES[dayIndex(iso)] + ", " + d + ". " + MONTHS[m - 1]; }
-function planState() { return { start: S.start, overrides: S.overrides, status: S.status, logs: S.logs }; }
+function planState() { return { start: S.start, plan: S.plan.data, overrides: S.overrides, status: S.status, logs: S.logs }; }
 function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
 function stopAnims() { stops.forEach(f => f()); stops = []; }
 const num = v => { const n = Number(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
-const icon = k => k === "strength" ? "🏋️" : k === "run" ? "🏃" : "🧘";
+const icon = k => k === "strength" ? "🏋️" : k === "run" ? "🏃" : k === "rest" ? "😴" : "🧘";
 function mainLog(date) { return logById(date + "-main"); }
 function paceOf(min, km) { if (!(min > 0 && km > 0)) return ""; const p = min / km; return Math.floor(p) + ":" + String(Math.round((p % 1) * 60)).padStart(2, "0"); }
 
@@ -79,7 +79,8 @@ function render() {
   keepAwake(r[0] === "tag");
   if (rest && location.hash !== rest.hash) stopRest();
   if (r[0] === "tag" && /^\d{4}-\d{2}-\d{2}$/.test(r[1] || "")) return r[2] === "mob" ? viewMobility(r[1], true) : viewDay(r[1]);
-  if (r[0] === "plan") return viewPlan();
+  if (r[0] === "plan") return r[1] === "bearbeiten" ? viewPlanEdit() : r[1] === "versionen" ? viewVersions() : r[1] === "archiv" ? viewArchive()
+    : r[1] === "planer" ? viewPlanner() : r[1] === "ansehen" ? viewPlanById(Number(r[2])) : viewPlan();
   if (r[0] === "statistik") return viewStats();
   if (r[0] === "mehr") return viewMore();
   return viewToday();
@@ -90,8 +91,9 @@ window.scrollToTop = () => window.scrollTo(0, 0);
 function viewToday() {
   const today = todayIso(), ps = planState();
   const week = weekOf(S.start, today);
-  const s = plannedSession(today, ps);
   const log = mainLog(today);
+  const s = plannedSession(today, ps, log && log.data && log.data.today);
+  const P = S.plan.data;
   const sugs = suggestions(ps, today);
   const st = S.status || {};
   const chips = [];
@@ -99,19 +101,19 @@ function viewToday() {
   for (const l of st.limits || []) chips.push(`<span class="badge warn">Einschränkung: ${esc(REGIONS[l.region])}</span>`);
   const heroKind = s.blocked ? "blocked" : s.kind;
   const doneTxt = log ? (log.status === "done" ? "✓ Erledigt" : log.status === "skipped" ? "Ausgelassen" : "Angefangen") : "";
-  const sub = s.kind === "strength" ? s.sub + " · " + s.minutes + " Min." : s.kind === "run" ? s.short : s.sub;
+  const sub = s.kind === "strength" ? s.sub + (s.minutes ? " · " + s.minutes + " Min." : "") : s.kind === "run" ? s.short : s.sub;
   const mob = logById(today + "-mob");
   let weekHtml = "";
   const mon = addDays(today, -dayIndex(today));
   for (let i = 0; i < 7; i++) {
-    const d = addDays(mon, i), l = mainLog(d), k = WEEK[i].kind;
+    const d = addDays(mon, i), l = mainLog(d), k = P.days[i].kind;
     const cls = l && l.status === "done" ? "done" : l && l.status === "skipped" ? "skip" : "";
     weekHtml += `<a href="#/tag/${d}" class="${d === today ? "today" : ""}"><span class="mute">${DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span></a>`;
   }
   $app.innerHTML = `
     <p class="mute small" style="margin:0">${esc(longDate(today))}</p>
-    <h1>${week == null ? "Plan startet am " + fmtDate(S.start) : week > 8 ? "Plan geschafft 🎉" : "Woche " + week + " von 8"}</h1>
-    <p class="mute small" style="margin:0 0 14px">${week && week <= 8 && s.kind === "strength" ? esc(s.focus.text) : week === 5 ? "Deload-Woche – etwas weniger Umfang" : "Phase 2 · Muskelaufbau, Core, VO₂max"}</p>
+    <h1>${week == null ? "Plan startet am " + fmtDate(S.start) : week > P.weeks ? "Plan geschafft 🎉" : "Woche " + week + " von " + P.weeks}</h1>
+    <p class="mute small" style="margin:0 0 14px">${esc(P.name)} · Version ${S.plan.version}${week && week <= P.weeks ? " · " + esc(focusFor(P, week).text) : ""}</p>
     ${chips.length ? `<div class="row wrap" style="margin-bottom:12px">${chips.join("")}</div>` : ""}
     <div class="hero ${heroKind}">
       <div class="k">Heute · ${esc(KIND_LABEL[s.kind])}</div>
@@ -151,14 +153,19 @@ function pruneDecisions(d) { const e = Object.entries(d); return Object.fromEntr
 
 /* ---------- Tag (Training) ---------- */
 function viewDay(date) {
-  const s = plannedSession(date, planState());
+  const log = mainLog(date);
+  const s = plannedSession(date, planState(), log && log.data && log.data.today);
   if (s.kind === "strength") return viewStrength(date, s);
   if (s.kind === "run") return viewRun(date, s);
+  if (s.kind === "rest") return viewRest(date, s);
   return viewMobility(date, false, s);
 }
 function header(date, s, extra = "") {
   return `<div class="top"><a class="back" href="#/heute" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">${esc(longDate(date))} · Woche ${s.week}</div><h1 style="font-size:24px">${esc(s.title)}</h1></div>${extra}</div>
   ${s.notes && s.notes.length ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}`;
+}
+function viewRest(date, s) {
+  $app.innerHTML = header(date, s) + `<div class="card"><p style="margin:0 0 12px">${esc(s.sub)}</p><a class="btn alt" href="#/tag/${date}/mob">Mobility öffnen</a></div>`;
 }
 
 // Letzte Werte einer Übung (für Vorschläge beim Eintragen)
@@ -167,12 +174,16 @@ function lastSets(slot, id, before) {
     .sort((a, b) => a.date < b.date ? 1 : -1)[0];
   return l ? { date: l.date, sets: l.data.ex[slot].sets.filter(x => x.done) } : null;
 }
+const planRef = () => ({ id: S.plan.id, v: S.plan.version });
 
-function viewStrength(date, s) {
+function viewStrength(date) {
   const id = date + "-main";
   const log = logById(id);
-  const data = log ? JSON.parse(JSON.stringify(log.data)) : { workout: s.workout, ex: {} };
+  const data = log ? JSON.parse(JSON.stringify(log.data)) : {};
   data.ex = data.ex || {};
+  data.today = data.today || {};
+  const s = plannedSession(date, planState(), data.today);
+  data.workout = s.workout;
   for (const it of s.items) {
     const e = data.ex[it.slot];
     if (!e || e.id !== it.id) data.ex[it.slot] = { id: it.id, sets: Array.from({ length: it.sets }, () => ({ r: "", w: "", done: false })) };
@@ -180,12 +191,17 @@ function viewStrength(date, s) {
     while (sets.length < it.sets) sets.push({ r: "", w: "", done: false });
     while (sets.length > it.sets && !sets[sets.length - 1].done) sets.pop();
   }
-  const complete = it => data.ex[it.slot].sets.every(x => x.done);
-  if (!ui.open || ui.openDate !== date || !s.items.some(i => i.slot === ui.open)) { const f = s.items.find(i => !complete(i)); ui.open = f ? f.slot : null; ui.openDate = date; }
-  const persist = (status) => { const l = { id, date, kind: "strength", status: status || (log && log.status === "done" ? "done" : "partial"), data }; saveLater(l); return l; };
+  const complete = it => it.skipped || data.ex[it.slot].sets.every(x => x.done);
+  const active = s.items.filter(i => !i.skipped);
+  if (!ui.open || ui.openDate !== date || !active.some(i => i.slot === ui.open)) { const f = active.find(i => !complete(i)); ui.open = f ? f.slot : null; ui.openDate = date; }
+  const persist = (status) => { data.pv = planRef(); const l = { id, date, kind: "strength", status: status || (log && log.status === "done" ? "done" : "partial"), data }; saveLater(l); return l; };
 
-  const exHtml = s.items.map((it, n) => {
-    const ex = EXERCISES[it.id], open = ui.open === it.slot, e = data.ex[it.slot];
+  let n = 0;
+  const exHtml = s.items.map(it => {
+    const ex = EXERCISES[it.id], open = ui.open === it.slot && !it.skipped, e = data.ex[it.slot];
+    if (it.skipped) return `<div class="card ex skipped" id="ex-${it.slot}"><div class="head"><span class="num">–</span><div class="grow"><b>${esc(it.name)}</b><div class="mute small">heute übersprungen</div></div>
+      <button class="btn sm ghost" data-unskip="${it.slot}">Doch machen</button></div></div>`;
+    n++;
     const last = lastSets(it.slot, it.id, date);
     const target = it.sets + " × " + it.reps[0] + "–" + it.reps[1] + (it.type === "time" ? " s" : "") + (it.side ? " je Seite" : "");
     const lastTxt = last ? "Letztes Mal (" + fmtDate(last.date) + "): " + last.sets.map(x => (x.r || "–") + (it.type === "time" ? " s" : "") + (num(x.w) ? " @ " + fmtKg(num(x.w)) : "")).join(" · ") : "";
@@ -195,11 +211,13 @@ function viewStrength(date, s) {
       <input type="text" inputmode="numeric" data-f="r" data-s="${it.slot}" data-k="${k}" value="${esc(x.r)}" placeholder="${it.type === "time" ? it.reps[1] + " s" : it.reps[0] + "–" + it.reps[1]}" aria-label="${it.type === "time" ? "Sekunden" : "Wiederholungen"} Satz ${k + 1}">
       <input type="text" inputmode="decimal" data-f="w" data-s="${it.slot}" data-k="${k}" value="${esc(x.w)}" placeholder="${wDefault ? String(wDefault).replace(".", ",") + " kg" : "kg"}" aria-label="Gewicht Satz ${k + 1}">
       ${it.type === "time" && !x.done ? `<button class="timerbtn" data-hold="${it.slot}" data-k="${k}" aria-label="Timer starten">▶</button>` : `<button class="check ${x.done ? "on" : ""}" data-check="${it.slot}" data-k="${k}" aria-label="Satz ${k + 1} erledigt">✓</button>`}`).join("");
+    const badges = (it.extra ? `<span class="badge good">zusätzlich</span> ` : "") + (it.swappedToday ? `<span class="badge">heute ersetzt</span> ` : it.swapped ? `<span class="badge">ersetzt</span> ` : "") + (it.caution ? `<span class="badge warn">Vorsicht: ${esc(it.caution)}</span>` : "");
     return `<div class="card ex ${complete(it) ? "complete" : ""}" id="ex-${it.slot}">
-      <div class="head" data-open="${it.slot}"><span class="num">${complete(it) ? "✓" : n + 1}</span>
-        <div class="grow"><b>${esc(it.name)}</b> ${it.swapped ? `<span class="badge">ersetzt</span>` : ""} ${it.caution ? `<span class="badge warn">Vorsicht: ${esc(it.caution)}</span>` : ""}
+      <div class="head" data-open="${it.slot}"><span class="num">${complete(it) ? "✓" : n}</span>
+        <div class="grow"><b>${esc(it.name)}</b> ${badges}
         <div class="mute small">${esc(target)}${it.note ? " · " + esc(it.note) : ""}</div></div>
-        ${open ? "" : `<span class="thumb">${still(ex.anim)}</span>`}</div>
+        ${open ? "" : `<span class="thumb">${still(ex.anim)}</span>`}
+        <button class="more" data-menu="${it.slot}" aria-label="Optionen für ${esc(it.name)}">⋯</button></div>
       ${open ? `<div class="body"><div class="figwrap" data-anim="${esc(ex.anim)}"></div>
         <ul class="cues">${ex.cues.map(c => `<li>${esc(c)}</li>`).join("")}</ul>
         ${lastTxt ? `<p class="mute small" style="margin:0 0 10px">${esc(lastTxt)}</p>` : ""}
@@ -207,34 +225,40 @@ function viewStrength(date, s) {
         <p class="mute tiny" style="margin:10px 0 0">Pause nach jedem Satz: ${it.rest} s · Ziel: ${esc(s.focus.rir)} Wdh. im Tank</p></div>` : ""}
     </div>`;
   }).join("");
-  const doneCount = s.items.filter(complete).length;
-  $app.innerHTML = header(date, s, `<span class="badge">${doneCount}/${s.items.length}</span>`) + `
+  const doneCount = active.filter(complete).length;
+  $app.innerHTML = header(date, s, `<span class="badge">${doneCount}/${active.length}</span>`) + `
     <p class="mute small" style="margin:-4px 0 12px">${esc(s.sub)} · ${esc(s.minutes)} Min. · ${esc(s.focus.text)}</p>
-    <p class="mute tiny" style="margin:-6px 0 12px">Aufwärmen: 5–10 Minuten locker bewegen, danach dehnen.</p>
+    <p class="mute tiny" style="margin:-6px 0 12px">Aufwärmen: 5–10 Minuten locker bewegen, danach dehnen. Mit ⋯ kannst du eine Übung überspringen, ersetzen oder entfernen.</p>
     ${exHtml}
-    <button class="btn full" id="finish" style="margin-top:6px">${log && log.status === "done" ? "Abschluss ändern" : "Training abschließen"}</button>
+    <button class="btn alt full" id="addEx" style="margin:0 0 12px">+ Übung hinzufügen</button>
+    <button class="btn full" id="finish">${log && log.status === "done" ? "Abschluss ändern" : "Training abschließen"}</button>
     <div class="row" style="justify-content:center;margin-top:8px"><button class="btn ghost sm" id="skip">Heute auslassen</button>${log ? `<button class="btn ghost sm" id="reset">Zurücksetzen</button>` : ""}</div>`;
 
   $app.querySelectorAll("[data-anim]").forEach(el => stops.push(mount(el, el.dataset.anim)));
-  $app.querySelectorAll("[data-open]").forEach(h => h.addEventListener("click", () => { ui.open = ui.open === h.dataset.open ? null : h.dataset.open; render(); setTimeout(() => { const el = document.getElementById("ex-" + h.dataset.open); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30); }));
+  $app.querySelectorAll("[data-open]").forEach(h => h.addEventListener("click", ev => {
+    if (ev.target.closest("[data-menu]")) return;
+    ui.open = ui.open === h.dataset.open ? null : h.dataset.open; render();
+    setTimeout(() => { const el = document.getElementById("ex-" + h.dataset.open); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30);
+  }));
   $app.querySelectorAll("input[data-f]").forEach(inp => inp.addEventListener("input", () => {
     data.ex[inp.dataset.s].sets[Number(inp.dataset.k)][inp.dataset.f] = inp.value.trim().slice(0, 8); persist();
   }));
   const markDone = (slot, k) => {
     const it = s.items.find(i => i.slot === slot), x = data.ex[slot].sets[k];
     const inpR = $app.querySelector(`input[data-f="r"][data-s="${slot}"][data-k="${k}"]`), inpW = $app.querySelector(`input[data-f="w"][data-s="${slot}"][data-k="${k}"]`);
-    if (inpR) x.r = inpR.value.trim() || x.r; if (inpW) x.w = inpW.value.trim() || x.w;
-    if (!x.r) x.r = String(it.type === "time" ? it.reps[1] : (lastSets(slot, it.id, date) || { sets: [] }).sets[k]?.r || it.reps[1]);
+    if (inpR) x.r = inpR.value.trim() || x.r;
+    if (inpW) x.w = inpW.value.trim() || x.w;
+    if (!x.r) x.r = String(it.type === "time" ? it.reps[1] : ((lastSets(slot, it.id, date) || { sets: [] }).sets[k] || {}).r || it.reps[1]);
     if (!x.w && inpW && inpW.placeholder !== "kg") x.w = inpW.placeholder.replace(" kg", "");
     x.done = true;
     const allDone = data.ex[slot].sets.every(y => y.done);
-    const lastOfAll = allDone && s.items.every(i => data.ex[i.slot].sets.every(y => y.done));
-    if (allDone) { const nx = s.items.find(i => !data.ex[i.slot].sets.every(y => y.done)); ui.open = nx ? nx.slot : null; }
+    const lastOfAll = allDone && active.every(i => data.ex[i.slot].sets.every(y => y.done));
+    if (allDone) { const nx = active.find(i => !data.ex[i.slot].sets.every(y => y.done)); ui.open = nx ? nx.slot : null; }
     persist();
     if (!lastOfAll) startRest(it.rest, allDone ? "Nächste Übung" : "Satz " + (k + 2));
     render();
     if (allDone && ui.open) setTimeout(() => { const el = document.getElementById("ex-" + ui.open); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30);
-    if (lastOfAll) { toast("Alle Übungen geschafft 💪"); }
+    if (lastOfAll) toast("Alle Übungen geschafft 💪");
   };
   $app.querySelectorAll("[data-check]").forEach(b => b.addEventListener("click", () => {
     const slot = b.dataset.check, k = Number(b.dataset.k), x = data.ex[slot].sets[k];
@@ -246,14 +270,80 @@ function viewStrength(date, s) {
     const secs = Math.max(5, Math.min(600, Math.round(num(inp && inp.value) || it.reps[1])));
     holdTimer(it.name, secs, it.side, EXERCISES[it.id].anim, () => { data.ex[slot].sets[k].r = String(secs); markDone(slot, k); });
   }));
+  $app.querySelectorAll("[data-unskip]").forEach(b => b.addEventListener("click", () => { delete data.today.skip[b.dataset.unskip]; persist(); render(); }));
+  $app.querySelectorAll("[data-menu]").forEach(b => b.addEventListener("click", () => exerciseMenu(s, s.items.find(i => i.slot === b.dataset.menu), data, persist)));
+  $app.querySelector("#addEx").addEventListener("click", () => pickExercise("Übung hinzufügen", null, eid => {
+    const d = defaultsFor(eid, S.plan.data);
+    const slot = "x" + Date.now().toString(36);
+    data.today.extra = (data.today.extra || []).concat([{ slot, id: eid, sets: d.sets, reps: d.reps }]);
+    ui.open = slot; persist(); render();
+    setTimeout(() => { const el = document.getElementById("ex-" + slot); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 30);
+  }));
   $app.querySelector("#finish").addEventListener("click", () => finishSheet(date, data.feel, data.pain, data.note, async (feel, pain, note) => {
-    Object.assign(data, { feel, pain, note });
+    Object.assign(data, { feel, pain, note, pv: planRef() });
     clearTimeout(saveTimer); pending = null;
     await saveLog({ id, date, kind: "strength", status: "done", data });
     stopRest(); toast("Gespeichert"); location.hash = "#/heute";
   }));
   $app.querySelector("#skip").addEventListener("click", () => skipDay(date, "strength", data));
   const rb = $app.querySelector("#reset"); if (rb) rb.addEventListener("click", () => resetDay(id));
+}
+
+// Menü einer Übung im Training: nur heute oder dauerhaft (neue Planversion)
+function exerciseMenu(s, it, data, persist) {
+  const t = data.today;
+  const btn = (act, label, cls = "alt") => `<button class="btn full ${cls}" data-act="${act}" style="margin-bottom:8px">${label}</button>`;
+  const bg = sheet(`<h2 style="margin-top:0">${esc(it.name)}</h2>
+    <p class="mute small" style="margin-top:-6px">Nur für heute</p>
+    ${it.extra ? btn("dropExtra", "Wieder entfernen") : btn("skip", "Heute überspringen") + btn("swapToday", "Heute durch andere Übung ersetzen")}
+    ${it.swappedToday ? btn("unswap", "Ersetzung zurücknehmen") : ""}
+    <p class="mute small">Dauerhaft im Plan <span class="tiny">(neue Planversion)</span></p>
+    ${it.extra ? btn("keepExtra", "In den Plan übernehmen") : btn("swapPlan", "Im Plan ersetzen") + btn("removePlan", "Aus dem Plan entfernen", "danger")}
+    <button class="btn ghost full" data-act="close">Abbrechen</button>`);
+  const close = () => bg.remove();
+  const workoutKey = s.workout;
+  const changePlan = async (fn, note) => {
+    const draft = JSON.parse(JSON.stringify(S.plan.data));
+    fn(draft.workouts[workoutKey]);
+    try { const r = await api("/api/plan/save", { data: draft, note }); await load(); toast("Plan gespeichert als Version " + r.plan.version); render(); }
+    catch (e) { toast(e.message); }
+  };
+  bg.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", async () => {
+    const a = b.dataset.act; close();
+    if (a === "skip") { t.skip = { ...(t.skip || {}), [it.slot]: true }; persist(); render(); }
+    if (a === "unswap") { delete t.swap[it.slot]; persist(); render(); }
+    if (a === "dropExtra") { t.extra = (t.extra || []).filter(x => x.slot !== it.slot); delete data.ex[it.slot]; persist(); render(); }
+    if (a === "swapToday") pickExercise("Heute ersetzen: " + it.name, it.planId, eid => { t.swap = { ...(t.swap || {}), [it.slot]: eid }; ui.open = it.slot; persist(); render(); });
+    if (a === "swapPlan") pickExercise("Im Plan ersetzen: " + EXERCISES[it.planId].name, it.planId, eid => changePlan(w => {
+      const i = w.items.find(x => slotOf(x) === it.slot); const d = defaultsFor(eid, S.plan.data);
+      if (EXERCISES[i.id].type !== EXERCISES[eid].type) i.reps = d.reps;
+      i.slot = slotOf(i); i.id = eid; if (i.slot === eid) delete i.slot;
+    }, "Im Training ersetzt"));
+    if (a === "removePlan" && window.confirm(EXERCISES[it.planId].name + " dauerhaft aus „" + s.title + "“ entfernen? Die alte Version bleibt im Verlauf.")) changePlan(w => { w.items = w.items.filter(x => slotOf(x) !== it.slot); }, "Im Training entfernt");
+    if (a === "keepExtra") changePlan(w => { w.items.push({ id: it.id, ...(w.items.some(x => slotOf(x) === it.id) ? { slot: it.slot } : {}), sets: it.sets, reps: it.reps.slice() }); }, "Im Training hinzugefügt");
+  }));
+  bg.querySelector("[data-act=close]");
+}
+
+// Übungsauswahl aus dem gesamten Bestand
+const GROUPS = [
+  ["Oberkörper", ["pullup", "chinup", "ringrow", "latpulldown", "cablerow", "ringpushup", "inclinepushup", "chestpress", "ringdip", "dbpress", "machinepress", "lateralraise"]],
+  ["Beine & Hüfte", ["legpress", "legcurl", "splitsquat", "singlerdl", "glutebridge", "wallsit", "backext"]],
+  ["Core", ["hangingraise", "ringfallout", "sideplank", "copenhagen", "lsit", "pallof", "reversecrunch", "cablecrunch", "deadbug", "birddog", "plank", "hollow"]]
+];
+function pickExercise(title, forId, onPick) {
+  const alts = forId ? (EXERCISES[forId].alt || []) : [];
+  const listed = new Set(GROUPS.flatMap(g => g[1]));
+  const groups = [...(alts.length ? [["Passende Ersatzübungen", alts]] : []), ...GROUPS,
+    ["Weitere", Object.keys(EXERCISES).filter(k => !EXERCISES[k].mob && !listed.has(k))], ["Mobility", Object.keys(EXERCISES).filter(k => EXERCISES[k].mob)]].filter(g => g[1].length);
+  const bg = sheet(`<h2 style="margin-top:0">${esc(title)}</h2><input type="search" id="q" placeholder="Suchen …" autocomplete="off" style="margin-bottom:6px">
+    <div id="pl">${groups.map(([g, ids]) => `<div class="grp"><p class="mute small" style="margin:14px 0 2px;font-weight:600">${esc(g)}</p>${ids.filter(k => k !== forId).map(k => `<div class="pick" data-id="${k}" data-n="${esc((EXERCISES[k].name + " " + (EXERCISES[k].hint || "") + " " + k).toLowerCase())}"><span class="thumb">${still(EXERCISES[k].anim)}</span><div class="grow">${esc(EXERCISES[k].name)}<div class="mute tiny">${esc(EXERCISES[k].hint || (EXERCISES[k].type === "time" ? "halten" : ""))}</div></div></div>`).join("")}</div>`).join("")}</div>`);
+  bg.querySelector("#q").addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    bg.querySelectorAll(".pick").forEach(p => { p.style.display = !q || p.dataset.n.includes(q) ? "" : "none"; });
+    bg.querySelectorAll(".grp").forEach(g => { g.style.display = [...g.querySelectorAll(".pick")].some(p => p.style.display !== "none") ? "" : "none"; });
+  });
+  bg.querySelectorAll(".pick").forEach(p => p.addEventListener("click", () => { bg.remove(); onPick(p.dataset.id); }));
 }
 
 async function skipDay(date, kind, data) {
@@ -365,7 +455,7 @@ function viewRun(date, s) {
   $app.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => { const i = Number(b.dataset.step); data.steps[i] = !data.steps[i]; b.classList.toggle("on", data.steps[i]); persist(); }));
   ["min", "km", "hr"].forEach(k => $app.querySelector("#" + k).addEventListener("input", () => { showPace(); persist(); }));
   $app.querySelector("#finish").addEventListener("click", () => { readVals(); finishSheet(date, data.feel, data.pain, data.note, async (feel, pain, note) => {
-    Object.assign(data, { feel, pain, note, run: s.run, steps: s.steps.map((_, i) => true) });
+    Object.assign(data, { feel, pain, note, run: s.run, steps: s.steps.map((_, i) => true), pv: planRef() });
     clearTimeout(saveTimer); pending = null;
     await saveLog({ id, date, kind: "run", status: "done", data }); toast("Gespeichert"); location.hash = "#/heute";
   }); });
@@ -379,10 +469,10 @@ function viewMobility(date, morning, s0) {
   const id = date + (morning ? "-mob" : "-main"), log = logById(id);
   const data = log ? JSON.parse(JSON.stringify(log.data)) : { items: {} };
   data.items = data.items || {};
-  const items = MOBILITY.map(([eid, n, u]) => ({ id: eid, ex: EXERCISES[eid], amount: n, unit: u === "s" ? "s" : "Wdh." }));
+  const items = S.plan.data.mobility.map(m => ({ id: m.id, ex: EXERCISES[m.id], amount: m.amount, unit: m.unit === "s" ? "s" : "Wdh." }));
   const doneN = items.filter(i => data.items[i.id]).length;
-  $app.innerHTML = header(date, s, `<span class="badge rec">${doneN}/16</span>`) + `
-    <p class="mute small" style="margin:-4px 0 12px">${morning ? "Optional, ca. 10–15 Minuten. Nimm dir, was dir heute guttut." : "16 Übungen, 15–20 Minuten – dazu ein Spaziergang."}</p>
+  $app.innerHTML = header(date, s, `<span class="badge rec">${doneN}/${items.length}</span>`) + `
+    <p class="mute small" style="margin:-4px 0 12px">${morning ? "Optional, ca. 10–15 Minuten. Nimm dir, was dir heute guttut." : items.length + " Übungen, 15–20 Minuten – dazu ein Spaziergang."}</p>
     ${items.map((it, n) => {
       const open = ui.open === "m-" + it.id;
       return `<div class="card ex ${data.items[it.id] ? "complete" : ""}" id="ex-m-${it.id}"><div class="head" data-open="m-${it.id}"><span class="num">${data.items[it.id] ? "✓" : n + 1}</span>
@@ -411,65 +501,190 @@ function viewMobility(date, morning, s0) {
 }
 
 /* ---------- Plan ---------- */
+const famVersions = () => S.plans.filter(p => p.family === S.plan.family).sort((a, b) => b.version - a.version);
+function nextMonday() { const t = todayIso(); return addDays(t, 7 - dayIndex(t)); }
+
 function viewPlan() {
-  const today = todayIso(), cur = Math.max(1, Math.min(8, weekOf(S.start, today) || 1));
-  const w = ui.planWeek || cur;
+  const today = todayIso(), P = S.plan.data, cur = Math.max(1, Math.min(P.weeks, weekOf(S.start, today) || 1));
+  const w = Math.min(ui.planWeek || cur, P.weeks);
   const ps = planState();
   let days = "";
   for (let i = 0; i < 7; i++) {
     const d = addDays(S.start, (w - 1) * 7 + i), s = plannedSession(d, ps), l = mainLog(d);
-    const sub = s.kind === "strength" ? s.sub : s.kind === "run" ? s.short : "Mobility + Spaziergang";
+    const sub = s.kind === "strength" ? s.sub : s.kind === "run" ? s.short : s.sub;
     days += `<a href="#/tag/${d}"><span class="dot ${s.kind}"></span><div class="grow"><b>${DAY_NAMES[dayIndex(d)]}</b> <span class="mute small">${fmtDate(d)}</span><div class="small">${esc(s.title)} · <span class="mute">${esc(sub)}</span></div></div>
       ${l ? (l.status === "done" ? `<span class="ok">✓</span>` : l.status === "skipped" ? `<span class="mute">–</span>` : `<span class="badge">läuft</span>`) : d === today ? `<span class="badge">heute</span>` : ""}</a>`;
   }
-  const ov = (S.overrides && S.overrides.ex) || {};
-  const edit = Object.entries(WORKOUTS).map(([key, wk]) => `<div class="card"><b>${esc(wk.title)}</b> <span class="mute small">${esc(wk.sub)}</span><div class="list">${wk.items.map(([slot, sets, reps]) => {
-    const o = ov[slot] || {}, ex = EXERCISES[o.swap || slot];
-    const chg = [o.swap ? "ersetzt" : "", Number.isInteger(o.sets) ? (o.sets === 0 ? "weggelassen" : o.sets + " Sätze") : "", Array.isArray(o.reps) ? o.reps.join("–") + " Wdh." : "", o.weight ? fmtKg(o.weight) : "", o.note || ""].filter(Boolean).join(" · ");
-    return `<div class="it" data-edit="${slot}" role="button" tabindex="0"><div class="grow"><div>${esc(ex.name)}</div><div class="mute small">${(Number.isInteger(o.sets) ? o.sets : sets)} × ${(o.reps || reps).join("–")}${ex.type === "time" ? " s" : ""}${chg ? ` · <span style="color:var(--acc)">${esc(chg)}</span>` : ""}</div></div><span class="mute">›</span></div>`;
-  }).join("")}</div></div>`).join("");
-  $app.innerHTML = `<h1>Plan</h1><p class="mute small" style="margin:0 0 12px">8 Wochen · Phase 2 · Start ${fmtDate(S.start)} (änderbar unter „Ich“)</p>
-    <div class="weeks">${[1, 2, 3, 4, 5, 6, 7, 8].map(n => `<button data-w="${n}" class="${n === w ? "on" : ""} ${n === cur ? "now" : ""}">W${n}</button>`).join("")}</div>
+  const drafts = S.plans.filter(p => p.status === "draft");
+  const archived = S.plans.filter(p => p.status === "archived");
+  const pl = S.planner || {};
+  const waiting = pl.status === "offen" && !drafts.some(d => d.createdAt > pl.at);
+  const editing = ui.edit && ui.editBase === S.plan.id && diffPlans(S.plan.data, ui.edit).length;
+  $app.innerHTML = `<h1>Plan</h1>
+    <div class="card"><div class="row"><div class="grow"><h3>${esc(P.name)}</h3><div class="mute small">Version ${S.plan.version} · ${P.weeks} Wochen · Start ${fmtDate(S.start)}</div></div><span class="badge good">aktiv</span></div>
+      ${P.goal ? `<p class="small" style="margin:8px 0 0">${esc(P.goal)}</p>` : ""}
+      <div class="row wrap" style="margin-top:12px"><a class="btn sm" href="#/plan/bearbeiten">${editing ? "Bearbeitung fortsetzen" : "Bearbeiten"}</a>
+      <a class="btn sm alt" href="#/plan/versionen">Verlauf (${famVersions().length})</a><a class="btn sm alt" href="#/plan/planer">Neuer Plan</a></div></div>
+    ${drafts.map(d => `<a class="card sug good" href="#/plan/ansehen/${d.id}" style="display:block;text-decoration:none;color:inherit"><span class="badge good">Vorschlag</span>
+      <h3 style="margin-top:8px">${esc(d.name)}</h3>${d.note ? `<p>${esc(d.note)}</p>` : ""}<span class="btn sm" style="margin-top:4px">Ansehen</span></a>`).join("")}
+    ${waiting ? `<div class="note" style="background:var(--acc-soft);color:var(--acc)">Deine Planer-Angaben vom ${fmtDate(pl.at.slice(0, 10))} sind gespeichert. Sag Claude im Chat „Planer ist ausgefüllt“ – dann kommen hier Vorschläge für den neuen Plan.</div>` : ""}
+    <div class="weeks">${Array.from({ length: P.weeks }, (_, k) => k + 1).map(n => `<button data-w="${n}" class="${n === w ? "on" : ""} ${n === cur ? "now" : ""}">W${n}</button>`).join("")}</div>
     <div class="card list">${days}</div>
-    <h2>Übungen anpassen</h2><p class="mute small" style="margin-top:-4px">Übung tauschen, Sätze, Wiederholungen oder Gewicht ändern. Gilt ab sofort für alle Wochen.</p>${edit}`;
+    ${archived.length ? `<a class="card row" href="#/plan/archiv" style="text-decoration:none;color:inherit"><div class="grow"><b>Archiv</b><div class="mute small">${archived.length} ${archived.length === 1 ? "früherer Plan" : "frühere Pläne"}</div></div><span class="mute">›</span></a>` : ""}`;
   $app.querySelectorAll("[data-w]").forEach(b => b.addEventListener("click", () => { ui.planWeek = Number(b.dataset.w); render(); }));
-  $app.querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => editExercise(b.dataset.edit)));
 }
-function editExercise(slot) {
-  const base = Object.values(WORKOUTS).flatMap(w => w.items).find(i => i[0] === slot);
-  const o = { ...(((S.overrides || {}).ex || {})[slot] || {}) };
-  const orig = EXERCISES[slot];
-  const choices = [slot, ...orig.alt, ...Object.keys(EXERCISES).filter(k => !EXERCISES[k].mob && k !== slot && !orig.alt.includes(k))];
-  const bg = sheet(`<h2 style="margin-top:0">${esc(orig.name)}</h2>
-    <label class="f">Übung</label><select id="swap">${choices.map((k, i) => `<option value="${k}" ${(o.swap || slot) === k ? "selected" : ""}>${esc(EXERCISES[k].name)}${i === 0 ? " (Plan)" : orig.alt.includes(k) ? " – Ersatz" : ""}</option>`).join("")}</select>
-    <div class="grid3"><div><label class="f">Sätze</label><input id="sets" type="text" inputmode="numeric" value="${Number.isInteger(o.sets) ? o.sets : base[1]}"></div>
-    <div><label class="f">von</label><input id="r0" type="text" inputmode="numeric" value="${(o.reps || base[2])[0]}"></div><div><label class="f">bis</label><input id="r1" type="text" inputmode="numeric" value="${(o.reps || base[2])[1]}"></div></div>
-    <label class="f">Gewicht (kg, optional)</label><input id="w" type="text" inputmode="decimal" value="${o.weight ? String(o.weight).replace(".", ",") : ""}">
-    <label class="f">Notiz (optional)</label><input id="n" type="text" maxlength="80" value="${esc(o.note || "")}">
-    <button class="btn full" id="ok" style="margin-top:14px">Speichern</button><button class="btn ghost full" id="rs" style="margin-top:6px">Wie im Plan</button>`);
-  const save = async (val) => {
-    const ov = JSON.parse(JSON.stringify(S.overrides || {})); ov.ex = ov.ex || {};
-    if (val) ov.ex[slot] = val; else delete ov.ex[slot];
-    try { await saveSettings({ overrides: ov }); bg.remove(); toast("Gespeichert"); render(); } catch (e) { toast(e.message); }
-  };
-  bg.querySelector("#ok").addEventListener("click", () => {
-    const v = {}, sw = bg.querySelector("#swap").value;
-    if (sw !== slot) v.swap = sw;
-    const sets = Math.round(num(bg.querySelector("#sets").value)); if (sets !== base[1] && sets >= 0 && sets <= 8) v.sets = sets;
-    const r0 = Math.round(num(bg.querySelector("#r0").value)), r1 = Math.round(num(bg.querySelector("#r1").value));
-    if (r0 > 0 && r1 >= r0 && r1 <= 300 && (r0 !== base[2][0] || r1 !== base[2][1])) v.reps = [r0, r1];
-    const w = num(bg.querySelector("#w").value); if (w > 0 && w < 500) v.weight = w;
-    const n = bg.querySelector("#n").value.trim(); if (n) v.note = n.slice(0, 80);
-    if (Object.keys(v).length) v.reason = "manual";
-    save(Object.keys(v).length ? v : null);
+
+// Bearbeiten: Änderungen sammeln, dann als neue Version speichern
+function viewPlanEdit() {
+  if (!ui.edit || ui.editBase !== S.plan.id) { ui.edit = JSON.parse(JSON.stringify(S.plan.data)); ui.editBase = S.plan.id; }
+  const E = ui.edit, changes = diffPlans(S.plan.data, E);
+  $app.innerHTML = `<div class="top"><a class="back" href="#/plan" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">Version ${S.plan.version} bearbeiten</div><h1 style="font-size:24px">${esc(E.name)}</h1></div></div>
+    <div class="card"><label class="f" style="margin-top:0">Name des Plans</label><input type="text" id="pname" maxlength="60" value="${esc(E.name)}"></div>
+    ${Object.entries(E.workouts).map(([k, w]) => `<div class="card"><b>${esc(w.title)}</b> <span class="mute small">${esc(w.sub)}</span><div class="list">
+      ${w.items.map((i, n) => `<div class="it"><div class="grow" data-item="${k}:${n}" role="button" tabindex="0"><div>${esc(EXERCISES[i.id].name)}</div><div class="mute small">${i.sets} × ${i.reps.join("–")}${EXERCISES[i.id].type === "time" ? " s" : ""}${EXERCISES[i.id].side ? " je Seite" : ""}</div></div>
+        <button class="more" data-up="${k}:${n}" aria-label="nach oben" ${n === 0 ? "disabled" : ""}>↑</button><button class="more" data-down="${k}:${n}" aria-label="nach unten" ${n === w.items.length - 1 ? "disabled" : ""}>↓</button></div>`).join("")}
+      </div><button class="btn sm alt" data-add="${k}" style="margin-top:8px">+ Übung</button></div>`).join("")}
+    <div class="card ${changes.length ? "sug good" : ""}"><b>${changes.length ? changes.length + (changes.length === 1 ? " Änderung" : " Änderungen") : "Noch keine Änderungen"}</b>
+      ${changes.length ? `<ul class="cues small" style="margin-top:6px">${changes.map(c => `<li>${esc(c)}</li>`).join("")}</ul>
+      <label class="f">Grund (optional)</label><input type="text" id="pnote" maxlength="200" placeholder="z. B. Schulter schonen">
+      <button class="btn full" id="psave" style="margin-top:12px">Als Version ${Math.max(...famVersions().map(v => v.version), S.plan.version) + 1} speichern</button>
+      <button class="btn ghost full" id="pdrop" style="margin-top:6px">Änderungen verwerfen</button>` : `<p class="mute small" style="margin:6px 0 0">Tippe auf eine Übung, um sie zu ändern. Gespeichert wird erst, wenn du auf „Als Version … speichern“ tippst – die bisherige Version bleibt im Verlauf.</p>`}</div>`;
+  $app.querySelector("#pname").addEventListener("change", e => { const v = e.target.value.trim(); if (v) { E.name = v.slice(0, 60); render(); } });
+  const at = s => { const [k, n] = s.split(":"); return [E.workouts[k], Number(n)]; };
+  $app.querySelectorAll("[data-up],[data-down]").forEach(b => b.addEventListener("click", () => {
+    const [w, n] = at(b.dataset.up || b.dataset.down), m = b.dataset.up ? n - 1 : n + 1;
+    [w.items[n], w.items[m]] = [w.items[m], w.items[n]]; render();
+  }));
+  $app.querySelectorAll("[data-item]").forEach(b => b.addEventListener("click", () => { const [w, n] = at(b.dataset.item); editItem(w, n); }));
+  $app.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => {
+    const w = E.workouts[b.dataset.add];
+    pickExercise("Übung zu „" + w.title + "“ hinzufügen", null, eid => {
+      const d = defaultsFor(eid, S.plan.data), item = { id: eid, sets: d.sets, reps: d.reps };
+      if (w.items.some(x => slotOf(x) === eid)) item.slot = eid + "2";
+      w.items.push(item); render();
+    });
+  }));
+  const sv = $app.querySelector("#psave");
+  if (sv) sv.addEventListener("click", async () => {
+    const v = validatePlan(E); if (v.error) return toast(v.error);
+    sv.disabled = true;
+    try { const r = await api("/api/plan/save", { data: v.plan, note: $app.querySelector("#pnote").value.trim() }); ui.edit = null; await load(); toast("Gespeichert als Version " + r.plan.version); location.hash = "#/plan"; }
+    catch (e) { sv.disabled = false; toast(e.message); }
   });
-  bg.querySelector("#rs").addEventListener("click", () => save(null));
+  const dr = $app.querySelector("#pdrop");
+  if (dr) dr.addEventListener("click", () => { ui.edit = null; location.hash = "#/plan"; });
+}
+function editItem(w, n) {
+  const i = w.items[n], ex = EXERCISES[i.id], unit = ex.type === "time" ? "Sekunden" : "Wiederholungen";
+  const bg = sheet(`<h2 style="margin-top:0">${esc(ex.name)}</h2>
+    <button class="btn alt full" id="chg">Andere Übung wählen</button>
+    <div class="grid3"><div><label class="f">Sätze</label><input id="sets" type="text" inputmode="numeric" value="${i.sets}"></div>
+    <div><label class="f">${unit} von</label><input id="r0" type="text" inputmode="numeric" value="${i.reps[0]}"></div><div><label class="f">bis</label><input id="r1" type="text" inputmode="numeric" value="${i.reps[1]}"></div></div>
+    <button class="btn full" id="ok" style="margin-top:14px">Übernehmen</button><button class="btn danger full" id="del" style="margin-top:8px">Aus dem Plan entfernen</button>`);
+  bg.querySelector("#chg").addEventListener("click", () => { bg.remove(); pickExercise("Ersetzen: " + ex.name, i.id, eid => {
+    i.slot = slotOf(i);   // Platz behält seinen Namen – so passen Einträge von heute und Gewichte weiter
+    if (EXERCISES[eid].type !== ex.type) i.reps = defaultsFor(eid, S.plan.data).reps;
+    i.id = eid; if (i.slot === eid) delete i.slot; render(); editItem(w, n);
+  }); });
+  bg.querySelector("#ok").addEventListener("click", () => {
+    const sets = Math.round(num(bg.querySelector("#sets").value)), r0 = Math.round(num(bg.querySelector("#r0").value)), r1 = Math.round(num(bg.querySelector("#r1").value));
+    if (!(sets >= 1 && sets <= 10)) return toast("Sätze: 1 bis 10");
+    if (!(r0 >= 1 && r1 >= r0 && r1 <= 900)) return toast("Bitte gültige Wiederholungen eingeben");
+    Object.assign(i, { sets, reps: [r0, r1] }); bg.remove(); render();
+  });
+  bg.querySelector("#del").addEventListener("click", () => { w.items.splice(n, 1); bg.remove(); render(); });
+}
+
+function viewVersions() {
+  const list = famVersions();
+  $app.innerHTML = `<div class="top"><a class="back" href="#/plan" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">Verlauf</div><h1 style="font-size:24px">${esc(S.plan.name)}</h1></div></div>
+    ${list.map(v => `<div class="card"><div class="row"><b class="grow">Version ${v.version}</b>${v.status === "active" ? `<span class="badge good">aktiv</span>` : ""}<span class="mute small">${fmtDate((v.createdAt || "").slice(0, 10))}</span></div>
+      ${v.changes.length ? `<ul class="cues small" style="margin:8px 0">${v.changes.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}${v.note ? `<p class="mute small" style="margin:0 0 8px">Grund: ${esc(v.note)}</p>` : ""}
+      <a class="btn sm alt" href="#/plan/ansehen/${v.id}">Ansehen</a></div>`).join("")}`;
+}
+function viewArchive() {
+  const list = S.plans.filter(p => p.status === "archived");
+  $app.innerHTML = `<div class="top"><a class="back" href="#/plan" aria-label="Zurück">‹</a><div class="grow"><h1 style="font-size:24px">Archiv</h1></div></div>
+    ${list.length ? list.map(p => `<a class="card row" href="#/plan/ansehen/${p.id}" style="text-decoration:none;color:inherit"><div class="grow"><b>${esc(p.name)}</b> <span class="mute small">Version ${p.version}</span>
+      <div class="mute small">Start ${p.start ? fmtDate(p.start) : "–"} · archiviert ${fmtDate((p.archivedAt || "").slice(0, 10))}</div></div><span class="mute">›</span></a>`).join("") : `<p class="mute">Noch keine früheren Pläne.</p>`}`;
+}
+
+async function viewPlanById(id) {
+  const meta = S.plans.find(p => p.id === id);
+  if (!meta) { $app.innerHTML = `<div class="card">Plan nicht gefunden. <a href="#/plan">Zurück</a></div>`; return; }
+  ui.planCache = ui.planCache || {};
+  if (!ui.planCache[id]) { $app.innerHTML = `<p class="mute">Lädt …</p>`; try { ui.planCache[id] = await api("/api/plan?id=" + id); } catch (e) { $app.innerHTML = `<div class="card">${esc(e.message)}</div>`; return; } if (route()[2] !== String(id)) return; }
+  const p = ui.planCache[id], P = p.data;
+  const back = meta.status === "draft" || meta.status === "active" ? "#/plan" : meta.status === "archived" ? "#/plan/archiv" : "#/plan/versionen";
+  const label = { draft: "Vorschlag", active: "aktiv", old: "frühere Version", archived: "archiviert" }[meta.status];
+  let actions = "";
+  if (meta.status === "draft" || meta.status === "archived") actions = `<div class="card"><b>${meta.status === "draft" ? "Diesen Plan anwenden" : "Wieder aktivieren"}</b>
+    <p class="mute small" style="margin:4px 0 8px">Dein aktueller Plan „${esc(S.plan.name)}“ (Version ${S.plan.version}) wandert ins Archiv – mit allen Versionen und Einträgen.</p>
+    <label class="f">Start (Montag der Woche 1)</label><input type="date" id="pstart" value="${nextMonday()}">
+    <button class="btn full" id="papply" style="margin-top:12px">Anwenden</button>${meta.status === "draft" ? `<button class="btn ghost full" id="pdiscard" style="margin-top:6px">Vorschlag verwerfen</button>` : ""}</div>`;
+  else if (meta.status === "old") actions = `<div class="card"><b>Diese Version wiederherstellen</b><p class="mute small" style="margin:4px 0 10px">Wird als neue Version gespeichert – nichts geht verloren.</p><button class="btn full" id="prestore">Wiederherstellen</button></div>`;
+  $app.innerHTML = `<div class="top"><a class="back" href="${back}" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">${esc(label)} · Version ${p.version}</div><h1 style="font-size:24px">${esc(P.name)}</h1></div></div>
+    ${p.note ? `<div class="card sug good"><b>${meta.status === "draft" ? "Warum dieser Vorschlag" : "Notiz"}</b><p style="color:inherit">${esc(p.note)}</p></div>` : ""}
+    ${p.changes.length ? `<div class="card"><b>${meta.status === "draft" ? "Das ändert sich" : "Änderungen"}</b><ul class="cues small" style="margin-top:6px">${p.changes.map(c => `<li>${esc(c)}</li>`).join("")}</ul></div>` : ""}
+    ${planReadOnly(P)}${actions}`;
+  const ap = $app.querySelector("#papply");
+  if (ap) ap.addEventListener("click", async () => {
+    const st = $app.querySelector("#pstart").value; if (!st) return toast("Bitte ein Startdatum wählen");
+    try { await api("/api/plan/apply", { id, start: st }); ui.planCache = {}; ui.edit = null; await load(); toast("Neuer Plan aktiv"); location.hash = "#/plan"; } catch (e) { toast(e.message); }
+  });
+  const dc = $app.querySelector("#pdiscard");
+  if (dc) dc.addEventListener("click", async () => { if (!window.confirm("Vorschlag verwerfen?")) return; await api("/api/plan/discard", { id }); await load(); location.hash = "#/plan"; });
+  const rs = $app.querySelector("#prestore");
+  if (rs) rs.addEventListener("click", async () => { try { const r = await api("/api/plan/restore", { id }); await load(); toast("Wiederhergestellt als Version " + r.plan.version); location.hash = "#/plan"; } catch (e) { toast(e.message); } });
+}
+// Plan lesbar darstellen (Vorschläge, alte Versionen, Archiv)
+function planReadOnly(P) {
+  const dayTxt = d => d.kind === "strength" ? P.workouts[d.workout].title : d.kind === "run" ? P.runs[d.run].title : d.kind === "rest" ? "Ruhetag" : "Aktive Erholung";
+  const runKeys = Object.keys(P.runs);
+  return `${P.goal ? `<p class="small">${esc(P.goal)}</p>` : ""}
+    <div class="card"><b>Woche</b> <span class="mute small">${P.weeks} Wochen</span><div class="list">${P.days.map((d, i) => `<div class="it"><span class="dot ${d.kind === "rest" ? "recovery" : d.kind}"></span><div class="grow"><b>${DAY_NAMES[i]}</b><div class="small">${esc(dayTxt(d))}</div></div></div>`).join("")}</div></div>
+    ${Object.values(P.workouts).map(w => `<div class="card"><b>${esc(w.title)}</b> <span class="mute small">${esc(w.sub)}${w.minutes ? " · " + esc(w.minutes) + " Min." : ""}</span><div class="list">${w.items.map(i => `<div class="it small"><span class="grow">${esc(EXERCISES[i.id].name)}</span><span class="mute">${i.sets} × ${i.reps.join("–")}${EXERCISES[i.id].type === "time" ? " s" : ""}</span></div>`).join("")}</div></div>`).join("")}
+    ${runKeys.length ? `<div class="card"><b>Läufe je Woche</b><div class="list">${Array.from({ length: P.weeks }, (_, k) => k + 1).map(n => `<div class="it small"><b style="width:30px">W${n}</b><span class="grow">${runKeys.map(r => esc(runFor(P, r, n).short)).join(" · ")}</span></div>`).join("")}</div></div>` : ""}
+    ${P.focus.length ? `<div class="card"><b>Steigerung</b><div class="list">${P.focus.map(f => `<div class="it small"><b style="width:56px">W${f.from}${f.to !== f.from ? "–" + f.to : ""}</b><span class="grow">${esc(f.text)}</span></div>`).join("")}</div></div>` : ""}
+    ${P.mobility.length ? `<div class="card"><b>Mobility</b> <span class="mute small">${P.mobility.length} Übungen</span><p class="small mute" style="margin:6px 0 0">${P.mobility.map(m => esc(EXERCISES[m.id].name)).join(", ")}</p></div>` : ""}`;
+}
+
+// Planer: Fragebogen für einen neuen Plan – Claude macht daraus Vorschläge
+const PLANNER = [
+  { k: "change", q: "Was soll anders werden?", multi: true, o: ["Neues Ziel", "Mehr Kraft / Muskelaufbau", "Mehr Ausdauer / Laufen", "Weniger Laufen", "Andere Übungen", "Mehr Abwechslung", "Kürzere Einheiten", "Andere Trainingstage", "Einschränkung berücksichtigen", "Neue Ausrüstung"] },
+  { k: "goals", q: "Ziele", multi: true, o: ["Muskelaufbau", "Maximalkraft", "Core & Rücken", "VO₂max / Ausdauer", "Wettkampf (z. B. 10 km)", "Körperfett reduzieren", "Beweglichkeit", "Fit und gesund bleiben"] },
+  { k: "days", q: "An welchen Tagen kannst du trainieren?", multi: true, o: DAY_NAMES.map(d => d.slice(0, 2)) },
+  { k: "minutes", q: "Zeit pro Einheit (Minuten)", o: ["30", "45", "60", "75", "90"] },
+  { k: "gym", q: "Fitnessstudio pro Woche", o: ["0", "1", "2", "3"] },
+  { k: "runs", q: "Läufe pro Woche", o: ["0", "1", "2", "3", "4"] },
+  { k: "equip", q: "Ausrüstung zuhause", multi: true, o: ["Klimmzugstange", "Ringe", "Kurzhanteln", "Widerstandsbänder", "Parallettes", "Bank", "Kettlebell", "Langhantel", "Rad / Laufband"] },
+  { k: "weeks", q: "Länge des neuen Plans (Wochen)", o: ["4", "6", "8", "10", "12"] },
+  { k: "good", q: "Was hat am aktuellen Plan gut funktioniert?", text: true },
+  { k: "bad", q: "Was soll weg oder anders sein?", text: true },
+  { k: "other", q: "Sonstiges (Wettkampf mit Datum, Urlaub, Beschwerden …)", text: true }
+];
+function viewPlanner() {
+  const A = JSON.parse(JSON.stringify((S.planner && S.planner.answers) || { days: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], minutes: "60", gym: "1", runs: "3", weeks: "8", equip: ["Klimmzugstange", "Ringe", "Kurzhanteln", "Widerstandsbänder", "Parallettes", "Bank"] }));
+  $app.innerHTML = `<div class="top"><a class="back" href="#/plan" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">Neuer Plan</div><h1 style="font-size:24px">Planer</h1></div></div>
+    <p class="mute small" style="margin:-4px 0 12px">Beantworte, was dir wichtig ist. Claude liest deine Angaben und deine bisherigen Trainings und erstellt daraus Vorschläge. Die erscheinen dann im Plan-Tab zum Ansehen und Anwenden.</p>
+    ${PLANNER.map(f => `<div class="card"><b>${esc(f.q)}</b>${f.text ? `<textarea data-t="${f.k}" maxlength="500" style="margin-top:8px">${esc(A[f.k] || "")}</textarea>`
+      : `<div class="row wrap" style="margin-top:8px">${f.o.map(o => `<span class="chip ${(f.multi ? (A[f.k] || []).includes(o) : A[f.k] === o) ? "on" : ""}" data-k="${f.k}" data-o="${esc(o)}">${esc(o)}</span>`).join("")}</div>`}</div>`).join("")}
+    <button class="btn full" id="send">Angaben speichern</button>`;
+  $app.querySelectorAll("[data-o]").forEach(c => c.addEventListener("click", () => {
+    const f = PLANNER.find(x => x.k === c.dataset.k), o = c.dataset.o;
+    if (f.multi) { const s = new Set(A[f.k] || []); s.has(o) ? s.delete(o) : s.add(o); A[f.k] = f.o.filter(x => s.has(x)); c.classList.toggle("on"); }
+    else { A[f.k] = o; $app.querySelectorAll(`[data-k="${f.k}"]`).forEach(x => x.classList.toggle("on", x === c)); }
+  }));
+  $app.querySelector("#send").addEventListener("click", async () => {
+    $app.querySelectorAll("[data-t]").forEach(t => { A[t.dataset.t] = t.value.trim().slice(0, 500); });
+    try { await api("/api/planner", { answers: A }); await load(); toast("Gespeichert – sag Claude Bescheid"); location.hash = "#/plan"; } catch (e) { toast(e.message); }
+  });
 }
 
 /* ---------- Statistik ---------- */
 function viewStats() {
   const today = todayIso(), ps = planState();
-  const curW = weekOf(S.start, today) || 0;
+  const curW = weekOf(S.start, today) || 0, P = S.plan.data;
   const weeks = [];
   const nW = Math.max(1, Math.min(Math.max(curW, 1), 12));
   for (let w = Math.max(1, nW - 7); w <= nW; w++) {
@@ -477,7 +692,7 @@ function viewStats() {
     for (let i = 0; i < 7; i++) {
       const d = addDays(S.start, (w - 1) * 7 + i);
       if (d > today) continue;
-      if (WEEK[i].kind !== "recovery") row.planned++;
+      if (!["recovery", "rest"].includes(P.days[i].kind)) row.planned++;
       const l = mainLog(d);
       if (l && l.status === "done") { row[l.kind] = (row[l.kind] || 0) + 1; if (l.kind === "run") row.km += num(l.data.km); }
     }
@@ -493,7 +708,9 @@ function viewStats() {
 
   // Kraft-Fortschritt: bester Satz je Einheit (mit Gewicht: geschätztes Maximum, sonst Wiederholungen)
   const prog = [];
-  for (const [key, wk] of Object.entries(WORKOUTS)) for (const [slot] of wk.items) {
+  const seenSlots = new Set();
+  for (const wk of Object.values(P.workouts)) for (const item of wk.items) {
+    const slot = slotOf(item); if (seenSlots.has(slot)) continue; seenSlots.add(slot);
     const pts = S.logs.filter(l => l.kind === "strength" && l.data && l.data.ex && l.data.ex[slot]).sort((a, b) => a.date < b.date ? -1 : 1).map(l => {
       const e = l.data.ex[slot], sets = (e.sets || []).filter(x => x.done);
       if (!sets.length) return null;
@@ -506,7 +723,7 @@ function viewStats() {
 
   $app.innerHTML = `<h1>Statistik</h1><p class="mute small" style="margin:0 0 12px">${curW ? "Woche " + Math.min(curW, 99) + " seit Planstart" : "Plan hat noch nicht begonnen"}</p>
     <div class="kpis">
-      <div class="kpi"><b>${thisW.strength + thisW.run}<span class="mute" style="font-size:15px">/6</span></b><span>Einheiten diese Woche</span></div>
+      <div class="kpi"><b>${thisW.strength + thisW.run}<span class="mute" style="font-size:15px">/${P.days.filter(d => d.kind === "strength" || d.kind === "run").length}</span></b><span>Einheiten diese Woche</span></div>
       <div class="kpi"><b>${thisW.km ? thisW.km.toFixed(1).replace(".", ",") : "0"}</b><span>km diese Woche</span></div>
       <div class="kpi"><b>${planned ? Math.round(doneMain / planned * 100) : 0} %</b><span>vom Plan geschafft</span></div>
       <div class="kpi"><b>${allDone.length}</b><span>Einheiten gesamt</span></div>
@@ -585,7 +802,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.1.0</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.2.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;

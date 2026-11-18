@@ -8,7 +8,10 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT || "playwright");
 const out = process.argv[2] || "/tmp/fitness-shots";
 const port = 8791, base = "http://localhost:" + port;
-const srv = spawn(process.execPath, ["--experimental-sqlite", "--no-warnings", new URL("./dev.mjs", import.meta.url).pathname, String(port)], { stdio: "inherit" });
+import { DatabaseSync } from "node:sqlite";
+import { rmSync } from "node:fs";
+const dbFile = "/tmp/fitness-e2e.sqlite"; rmSync(dbFile, { force: true });
+const srv = spawn(process.execPath, ["--experimental-sqlite", "--no-warnings", new URL("./dev.mjs", import.meta.url).pathname, String(port), dbFile], { stdio: "inherit" });
 await new Promise(r => setTimeout(r, 800));
 const fail = (m) => { console.error("FEHLER:", m); srv.kill(); process.exit(1); };
 
@@ -78,6 +81,51 @@ await page.click("[data-lim='schulter']"); await page.waitForTimeout(600);
 await page.goto(base + "/#/heute"); await page.waitForSelector(".hero");
 await shot("11-heute-einschraenkung", true);
 if (!(await page.textContent("body")).includes("Einschränkung Schulter")) fail("Ersatz-Vorschlag bei Einschränkung fehlt");
+
+// v0.2: im Training überspringen und Übung hinzufügen
+await page.goto(base + "/#/tag/2026-11-21"); await page.waitForSelector(".ex");
+await page.click("[data-menu='chinup']"); await page.click("[data-act='skip']"); await page.waitForTimeout(300);
+if (!(await page.textContent("#ex-chinup")).includes("übersprungen")) fail("Überspringen geht nicht");
+await page.click("#addEx"); await page.fill("#q", "plank"); await page.click(".pick[data-id='plank']"); await page.waitForTimeout(300);
+if (!(await page.textContent("body")).includes("zusätzlich")) fail("Zusätzliche Übung fehlt");
+await shot("13-training-angepasst");
+await page.click("[data-menu='ringdip']"); await page.waitForTimeout(200);
+await shot("14-uebung-menue");
+await page.click("[data-act='swapToday']"); await page.waitForTimeout(200);
+await shot("15-uebung-auswahl");
+await page.click(".pick[data-id='inclinepushup']"); await page.waitForTimeout(300);
+if (!(await page.textContent("#ex-ringdip")).includes("heute ersetzt")) fail("Heute ersetzen geht nicht");
+
+// Plan bearbeiten → Version 2
+await page.goto(base + "/#/plan/bearbeiten"); await page.waitForSelector("#pname");
+const gymRows = await page.$$("[data-item^='gym:']");
+await gymRows[5].click(); await page.fill("#sets", "3"); await page.click("#ok"); await page.waitForTimeout(200);
+await shot("16-bearbeiten", true);
+await page.fill("#pnote", "Schulter stärker trainieren"); await page.click("#psave"); await page.waitForTimeout(600);
+await page.goto(base + "/#/plan/versionen"); await page.waitForSelector(".card");
+if (!(await page.textContent("body")).includes("Schulterdrücken: 2 → 3 Sätze")) fail("Versionierung fehlt");
+if ((await page.textContent("body")).includes("NaN")) fail("Datum fehlt im Verlauf");
+await shot("17-versionen", true);
+
+// Planer und Vorschlag anwenden
+await page.goto(base + "/#/plan/planer"); await page.waitForSelector("#send");
+await page.click("[data-o='Mehr Abwechslung']"); await page.fill("[data-t='other']", "Halbmarathon im April");
+await shot("18-planer", true);
+await page.click("#send"); await page.waitForTimeout(500);
+const db = new DatabaseSync(dbFile);
+const cur = JSON.parse(db.prepare("SELECT data FROM plans WHERE status = 'active'").get().data);
+cur.name = "Phase 3 – Halbmarathon"; cur.weeks = 10;
+db.prepare("INSERT INTO plans (family, name, version, status, data, changes, note, created_at) VALUES ('p3', ?, 1, 'draft', ?, ?, ?, ?)")
+  .run(cur.name, JSON.stringify(cur), JSON.stringify(["10 statt 8 Wochen", "Langer Lauf steigt bis 18 km"]), "Mehr Laufumfang für den Halbmarathon, Kraft bleibt 3× pro Woche.", new Date().toISOString());
+await page.reload(); await page.goto(base + "/#/plan"); await page.waitForSelector(".card");
+await shot("19-plan-mit-vorschlag", true);
+if ((await page.textContent("body")).includes("Planer-Angaben vom")) fail("Hinweis trotz Vorschlag");
+await page.click("a[href^='#/plan/ansehen/']"); await page.waitForSelector("#papply");
+await shot("20-vorschlag", true);
+await page.click("#papply"); await page.waitForTimeout(700);
+if (!(await page.textContent("body")).includes("Phase 3 – Halbmarathon")) fail("Vorschlag nicht angewendet");
+await page.goto(base + "/#/plan/archiv"); await page.waitForSelector(".card");
+if (!(await page.textContent("body")).includes("Phase 2")) fail("Archiv fehlt");
 
 // Abmelden → Login-Seite, API gesperrt
 await page.goto(base + "/#/mehr"); await page.click("form[action='/logout'] button");

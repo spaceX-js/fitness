@@ -1,6 +1,6 @@
 // Coach: Empfehlungen zur Anpassung des Plans – nach Leistung, Gefühl, Krankheit und Einschränkungen.
 // Reine Regeln, keine KI und kein Fremddienst. Jede Empfehlung erklärt ihren Grund und wird nur auf Knopfdruck übernommen.
-import { EXERCISES, WORKOUTS, WEEK, REGIONS, sessionFor, weekOf, dayIndex } from "./plan.js";
+import { EXERCISES, REGIONS, sessionFor, weekOf, dayIndex, planOf, slotOf } from "./plan.js";
 
 export const SICK = {
   head: { label: "Erkältet (nur Kopf)", text: "Schnupfen, Halskratzen – nur oberhalb des Halses" },
@@ -12,8 +12,8 @@ export function addDays(iso, n) { const d = new Date(iso + "T12:00:00Z"); d.setU
 export function daysBetween(a, b) { return Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 86400000); }
 
 // Einheit eines Tages inkl. Status (krank / Einschränkungen) – so wird sie in der App angezeigt
-export function plannedSession(date, state) {
-  const s = sessionFor(date, state);
+export function plannedSession(date, state, today) {
+  const s = sessionFor(date, state, today);
   const st = state.status || {};
   const limits = (st.limits || []).map(l => l.region);
   const notes = [];
@@ -62,16 +62,18 @@ export function suggestions(state, today) {
   }
 
   // 2) Einschränkungen: belastende Übungen ersetzen (eine Karte für alle betroffenen Übungen)
+  const plan = planOf(state);
   const fixes = [], seen = new Set(), hitRegions = new Set();
-  for (const key of Object.keys(WORKOUTS)) for (const [slot] of WORKOUTS[key].items) {
+  for (const w of Object.values(plan.workouts)) for (const item of w.items) {
+    const slot = slotOf(item);
     if (seen.has(slot)) continue; seen.add(slot);
     const o = (ov.ex && ov.ex[slot]) || {};
     if (o.sets === 0) continue;
-    const cur = o.swap || slot;
+    const cur = o.swap || item.id;
     const hit = (EXERCISES[cur].load || []).filter(r => limits.includes(r));
     if (!hit.length) continue;
     hit.forEach(r => hitRegions.add(r));
-    const alt = (EXERCISES[slot].alt || []).find(a => a !== cur && !(EXERCISES[a].load || []).some(r => limits.includes(r)));
+    const alt = (EXERCISES[item.id].alt || []).find(a => a !== cur && !(EXERCISES[a].load || []).some(r => limits.includes(r)));
     fixes.push({ slot, cur, alt, op: alt ? { type: "swap", slot, to: alt, reason: "limit" } : { type: "sets", slot, sets: 0, reason: "limit" } });
   }
   if (fixes.length) add({ key: "limit-" + limits.slice().sort().join("+") + "-" + fixes.map(f => f.slot + ">" + (f.alt || 0)).join(","), level: "warn",
@@ -80,16 +82,18 @@ export function suggestions(state, today) {
     list: fixes.map(f => EXERCISES[f.cur].name + " → " + (f.alt ? EXERCISES[f.alt].name : "weglassen")),
     actions: [{ label: "Alle anpassen", op: { type: "multi", ops: fixes.map(f => f.op) } }] });
   // … und wieder zurück, wenn die Einschränkung weg ist
-  const back = Object.entries(ov.ex || {}).filter(([slot, o]) => o.reason === "limit" && !(EXERCISES[slot].load || []).some(r => limits.includes(r))).map(([slot]) => slot);
-  if (back.length) add({ key: "unlimit-" + back.join(",") + "-" + limits.join("+"), level: "info", title: (back.length === 1 ? EXERCISES[back[0]].name : back.length + " Übungen") + " wieder aufnehmen?",
-    text: "Die Einschränkung ist nicht mehr eingetragen. Zurück in den Plan: " + back.map(s => EXERCISES[s].name).join(", ") + " – anfangs etwas leichter.",
+  const planId = slot => { for (const w of Object.values(plan.workouts)) for (const i of w.items) if (slotOf(i) === slot) return i.id; return null; };
+  const back = Object.entries(ov.ex || {}).filter(([slot, o]) => o.reason === "limit" && planId(slot) && !(EXERCISES[planId(slot)].load || []).some(r => limits.includes(r))).map(([slot]) => slot);
+  if (back.length) add({ key: "unlimit-" + back.join(",") + "-" + limits.join("+"), level: "info", title: (back.length === 1 ? EXERCISES[planId(back[0])].name : back.length + " Übungen") + " wieder aufnehmen?",
+    text: "Die Einschränkung ist nicht mehr eingetragen. Zurück in den Plan: " + back.map(s => EXERCISES[planId(s)].name).join(", ") + " – anfangs etwas leichter.",
     actions: [{ label: "Zurück zum Plan", op: { type: "multi", ops: back.map(slot => ({ type: "reset", slot })) } }] });
 
   // 3) Leistung je Übung (letzte zwei Einheiten mit dieser Übung)
   const strength = logsOf(state, l => l.kind === "strength" && l.data && l.data.ex);
-  for (const key of Object.keys(WORKOUTS)) for (const [slot, , reps] of WORKOUTS[key].items) {
+  for (const w of Object.values(plan.workouts)) for (const item of w.items) {
+    const slot = slotOf(item), reps = item.reps;
     const o = (ov.ex && ov.ex[slot]) || {};
-    const id = o.swap || slot;
+    const id = o.swap || item.id;
     const range = Array.isArray(o.reps) ? o.reps : reps;
     const hist = strength.filter(l => l.data.ex[slot] && l.data.ex[slot].id === id && (l.data.ex[slot].sets || []).length).slice(-2);
     if (!hist.length) continue;
@@ -135,11 +139,11 @@ export function suggestions(state, today) {
 
   // 6) Verpasste Einheiten → Woche wiederholen
   const week = weekOf(state.start, today);
-  if (week && week >= 2 && week <= 8) {
+  if (week && week >= 2 && week <= plan.weeks) {
     let missed = 0;
     for (let i = 1; i <= 7; i++) {
       const d = addDays(today, -i);
-      if (WEEK[dayIndex(d)].kind === "recovery") continue;
+      if (["recovery", "rest"].includes(plan.days[dayIndex(d)].kind)) continue;
       if (d < state.start) continue;
       const done = (state.logs || []).some(l => l.date === d && l.status !== "skipped");
       if (!done) missed++;
@@ -150,8 +154,8 @@ export function suggestions(state, today) {
   }
 
   // 7) Plan geschafft
-  if (week && week > 8) add({ key: "done-" + state.start, level: "good", title: "Phase 2 geschafft",
-    text: "Die 8 Wochen sind um. Du kannst den Block wiederholen (mit deinen aktuellen Gewichten) – oder mir einen neuen Plan schicken.",
+  if (week && week > plan.weeks) add({ key: "done-" + state.start, level: "good", title: plan.name + " geschafft",
+    text: "Die " + plan.weeks + " Wochen sind um. Du kannst den Block wiederholen (mit deinen aktuellen Gewichten) – oder im Plan-Tab mit dem Planer einen neuen Plan anfragen.",
     actions: [{ label: "Ab nächstem Montag wiederholen", op: { type: "restart" } }] });
 
   const rank = { stop: 0, warn: 1, good: 2, info: 3 };

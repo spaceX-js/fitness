@@ -95,91 +95,183 @@ export const EXERCISES = {
   downdog:     { name: "Downward Dog", anim: "downdog", mob: true, type: "time", cues: ["Hüfte hoch, Arme lang", "Fersen abwechselnd zum Boden", "Rücken lang, Knie dürfen beugen"] }
 };
 
-// Mobility-Block (Donnerstag und optional jeden Morgen)
-export const MOBILITY = [
-  ["catcow", 15], ["childpose", 30, "s"], ["cobra", 30, "s"], ["deeplunge", 30, "s"], ["quadstretch", 30, "s"], ["worldsgreatest", 15],
-  ["ninetyninety", 15], ["pigeon", 30, "s"], ["deepsquat", 30, "s"], ["anklerocks", 15], ["rollingback", 15], ["hipcars", 15],
-  ["scorpion", 15], ["rockbacks", 15, "s"], ["scorpionreach", 15], ["downdog", 30, "s"]
-];
-
-// Krafteinheiten. sets/reps wie im Plan; reps [min, max]; bei type "time" sind es Sekunden.
-export const WORKOUTS = {
-  homeA: { title: "Home Workout A", sub: "Oberkörper + Core", minutes: "50–60", items: [
-    ["pullup", 4, [5, 10]], ["ringpushup", 4, [8, 15]], ["ringrow", 3, [8, 15]], ["dbpress", 3, [8, 12]],
-    ["lateralraise", 3, [12, 20]], ["hangingraise", 3, [6, 12]], ["ringfallout", 3, [6, 12]], ["sideplank", 2, [30, 45]]
-  ]},
-  gym: { title: "Fitnessstudio", sub: "Ganzkörper (schwer)", minutes: "60–75", items: [
-    ["legpress", 3, [6, 10]], ["legcurl", 3, [8, 12]], ["chestpress", 3, [6, 10]], ["latpulldown", 3, [6, 10]],
-    ["cablerow", 3, [8, 12]], ["machinepress", 2, [8, 12]], ["cablecrunch", 3, [8, 15]], ["backext", 3, [10, 15]]
-  ]},
-  homeB: { title: "Home Workout B", sub: "Calisthenics + Core / Hüfte", minutes: "50–60", items: [
-    ["ringdip", 3, [5, 10]], ["chinup", 3, [6, 10]], ["splitsquat", 2, [8, 12]], ["singlerdl", 3, [8, 12]],
-    ["lsit", 4, [10, 30]], ["pallof", 3, [10, 15]], ["reversecrunch", 3, [10, 15]], ["copenhagen", 2, [20, 45]]
-  ]}
-};
-
-// Wochentage: 0 = Montag … 6 = Sonntag
-export const WEEK = [
-  { kind: "strength", workout: "homeA" },
-  { kind: "run", run: "z2" },
-  { kind: "strength", workout: "gym" },
-  { kind: "recovery" },
-  { kind: "run", run: "interval" },
-  { kind: "strength", workout: "homeB" },
-  { kind: "run", run: "long" }
-];
 export const DAY_NAMES = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
-
 export const PROFILE = { height: 171, weight: 73, age: 43, restHr: 60, maxHr: 178, vo2max: 48.4, z2pace: "6:56", z2hr: 134 };
 export const ZONES = [
   { z: 1, from: 0, to: 129, color: "#4c8dff" }, { z: 2, from: 130, to: 140, color: "#2fb36d" },
   { z: 3, from: 141, to: 153, color: "#f2c230" }, { z: 4, from: 154, to: 165, color: "#f28a30" }, { z: 5, from: 166, to: 999, color: "#e5484d" }
 ];
 
-// Kraft-Steigerung (RIR = Wiederholungen „im Tank“)
-export function strengthFocus(week) {
-  if (week <= 2) return { rir: "2–3", text: "Gewichte finden – 2–3 Wiederholungen im Tank lassen" };
-  if (week <= 4) return { rir: "1–2", text: "Steigern – 1–2 Wiederholungen im Tank" };
-  if (week === 5) return { rir: "3", text: "Deload-Woche – ein Satz weniger, leichter (−25–30 % Volumen)", deload: true };
-  if (week <= 7) return { rir: "1–2", text: "Wieder steigern – 1–2 Wiederholungen im Tank" };
-  return { rir: "~1", text: "Letzte Woche – die letzten Sätze dürfen fordernd sein" };
-}
 
-// Läufe je Woche
-export function runFor(type, week) {
+/* ---------- Standardplan „Phase 2“ (aus dem Trainingsplan-Bild) ---------- */
+// Ein Plan ist reine Daten (wird in der Datenbank versioniert). Aufbau:
+// { name, goal, weeks, days[7]: {kind: strength|run|recovery|rest, workout|run},
+//   workouts: {key: {title, sub, minutes, items: [{id, sets, reps:[von,bis], slot?}]}},
+//   runs: {key: {title, zone, rpe, tips[], weeks: {"1": {short, km?, steps:[{label, detail, min?, km?, hard?}]}}}},
+//   focus: [{from, to, rir, text, deload?}], mobility: [{id, amount, unit: "s"|"Wdh"}] }
+function legacyRun(type, week) {
   if (type === "z2") {
     const min = week === 5 ? "35–40" : "35–45";
-    return { title: "Lauf – Zone 2", short: min + " Min. locker", zone: 2, rpe: "3–4/10",
-      steps: [
-        { label: "Locker laufen", detail: min + " Minuten, Puls 130–140 (Zone 2). Pace ca. 6:30–7:10 min/km – der Puls ist wichtiger als das Tempo.", min: week === 5 ? 37 : 40 }
-      ],
-      tips: ["Du kannst dich dabei noch unterhalten", "Ziel: gleiches Tempo mit niedrigerem Puls oder schneller bei gleichem Puls", "Referenz: 6:56 min/km bei 134 bpm"] };
+    return { short: min + " Min. locker", steps: [{ label: "Locker laufen", detail: min + " Minuten, Puls 130–140 (Zone 2). Pace ca. 6:30–7:10 min/km – der Puls ist wichtiger als das Tempo.", min: week === 5 ? 37 : 40 }] };
   }
   if (type === "interval") {
-    const t = { 1: [4, 3], 2: [4, 3], 3: [5, 3], 4: [5, 3], 5: [4, 3], 6: [4, 4], 7: [4, 4], 8: [5, 3] }[week] || [4, 3];
+    const t = { 1: [4, 3], 2: [4, 3], 3: [5, 3], 4: [5, 3], 5: [4, 3], 6: [4, 4], 7: [4, 4], 8: [5, 3] }[week];
     const steps = [{ label: "Einlaufen", detail: "10 Minuten locker", min: 10 }];
     for (let i = 1; i <= t[0]; i++) {
       steps.push({ label: "Intervall " + i + " von " + t[0], detail: t[1] + " Minuten schnell (RPE 8–9)", min: t[1], hard: true });
       if (i < t[0]) steps.push({ label: "Trabpause", detail: "2 Minuten locker traben", min: 2 });
     }
     steps.push({ label: "Auslaufen", detail: "10 Minuten locker", min: 10 });
-    return { title: "Intervalllauf (VO₂max)", short: t[0] + " × " + t[1] + " Min. schnell" + (week === 5 ? " (Deload)" : ""), zone: 4, rpe: "8–9/10",
-      steps, tips: ["Gleichmäßig – das erste Intervall nicht zu schnell", "Letztes Drittel jedes Intervalls darf hart sein", "Ziel: VO₂max Richtung 50"] };
+    return { short: t[0] + " × " + t[1] + " Min. schnell" + (week === 5 ? " (Deload)" : ""), steps };
   }
-  const long = {
-    1: ["8 km locker", "8 km locker in Zone 2", 8], 2: ["9 km locker", "9 km locker in Zone 2", 9],
+  const l = { 1: ["8 km locker", "8 km locker in Zone 2", 8], 2: ["9 km locker", "9 km locker in Zone 2", 9],
     3: ["9 km + 10 Min. moderat", "9 km locker, die letzten 10 Minuten moderat (Zone 3, 141–153)", 9],
     4: ["10 km locker", "10 km locker in Zone 2", 10], 5: ["8 km locker", "8 km locker in Zone 2 (Deload)", 8],
     6: ["10 km mit 2 × 8 Min. Zone 3", "10 km, darin 2 × 8 Minuten in Zone 3 (141–153), sonst locker", 10],
-    7: ["10 km locker", "10 km locker in Zone 2", 10],
-    8: ["10 km progressiv", "10 km progressiv: locker → moderat → letzte 2 km zügig", 10]
-  }[week] || ["8 km locker", "8 km locker in Zone 2", 8];
-  return { title: "Ausdauer + Tempo", short: long[0], zone: 2, rpe: "3–6/10", km: long[2],
-    steps: [{ label: "Langer Lauf", detail: long[1], km: long[2] }],
-    tips: ["Puls überwiegend 130–141 (Zone 2)", "Tempoanteile kontrolliert, nicht jedes Mal", "Ziel: Ausdauer, Tempohärte, Laufökonomie"] };
+    7: ["10 km locker", "10 km locker in Zone 2", 10], 8: ["10 km progressiv", "10 km progressiv: locker → moderat → letzte 2 km zügig", 10] }[week];
+  return { short: l[0], km: l[2], steps: [{ label: "Langer Lauf", detail: l[1], km: l[2] }] };
+}
+const wk = type => Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(w => [String(w), legacyRun(type, w)]));
+const it = (id, sets, reps) => ({ id, sets, reps });
+
+export const DEFAULT_PLAN = {
+  name: "Phase 2",
+  goal: "Muskelaufbau, starker Core, Hüfte & unterer Rücken, VO₂max steigern, Körperfett reduzieren",
+  weeks: 8,
+  days: [{ kind: "strength", workout: "homeA" }, { kind: "run", run: "z2" }, { kind: "strength", workout: "gym" }, { kind: "recovery" },
+    { kind: "run", run: "interval" }, { kind: "strength", workout: "homeB" }, { kind: "run", run: "long" }],
+  workouts: {
+    homeA: { title: "Home Workout A", sub: "Oberkörper + Core", minutes: "50–60", items: [
+      it("pullup", 4, [5, 10]), it("ringpushup", 4, [8, 15]), it("ringrow", 3, [8, 15]), it("dbpress", 3, [8, 12]),
+      it("lateralraise", 3, [12, 20]), it("hangingraise", 3, [6, 12]), it("ringfallout", 3, [6, 12]), it("sideplank", 2, [30, 45])] },
+    gym: { title: "Fitnessstudio", sub: "Ganzkörper (schwer)", minutes: "60–75", items: [
+      it("legpress", 3, [6, 10]), it("legcurl", 3, [8, 12]), it("chestpress", 3, [6, 10]), it("latpulldown", 3, [6, 10]),
+      it("cablerow", 3, [8, 12]), it("machinepress", 2, [8, 12]), it("cablecrunch", 3, [8, 15]), it("backext", 3, [10, 15])] },
+    homeB: { title: "Home Workout B", sub: "Calisthenics + Core / Hüfte", minutes: "50–60", items: [
+      it("ringdip", 3, [5, 10]), it("chinup", 3, [6, 10]), it("splitsquat", 2, [8, 12]), it("singlerdl", 3, [8, 12]),
+      it("lsit", 4, [10, 30]), it("pallof", 3, [10, 15]), it("reversecrunch", 3, [10, 15]), it("copenhagen", 2, [20, 45])] }
+  },
+  runs: {
+    z2: { title: "Lauf – Zone 2", zone: 2, rpe: "3–4/10", tips: ["Du kannst dich dabei noch unterhalten", "Ziel: gleiches Tempo mit niedrigerem Puls oder schneller bei gleichem Puls", "Referenz: 6:56 min/km bei 134 bpm"], weeks: wk("z2") },
+    interval: { title: "Intervalllauf (VO₂max)", zone: 4, rpe: "8–9/10", tips: ["Gleichmäßig – das erste Intervall nicht zu schnell", "Letztes Drittel jedes Intervalls darf hart sein", "Ziel: VO₂max Richtung 50"], weeks: wk("interval") },
+    long: { title: "Ausdauer + Tempo", zone: 2, rpe: "3–6/10", tips: ["Puls überwiegend 130–141 (Zone 2)", "Tempoanteile kontrolliert, nicht jedes Mal", "Ziel: Ausdauer, Tempohärte, Laufökonomie"], weeks: wk("long") }
+  },
+  focus: [
+    { from: 1, to: 2, rir: "2–3", text: "Gewichte finden – 2–3 Wiederholungen im Tank lassen" },
+    { from: 3, to: 4, rir: "1–2", text: "Steigern – 1–2 Wiederholungen im Tank" },
+    { from: 5, to: 5, rir: "3", text: "Deload-Woche – ein Satz weniger, leichter (−25–30 % Volumen)", deload: true },
+    { from: 6, to: 7, rir: "1–2", text: "Wieder steigern – 1–2 Wiederholungen im Tank" },
+    { from: 8, to: 8, rir: "~1", text: "Letzte Woche – die letzten Sätze dürfen fordernd sein" }],
+  mobility: [["catcow", 15], ["childpose", 30, "s"], ["cobra", 30, "s"], ["deeplunge", 30, "s"], ["quadstretch", 30, "s"], ["worldsgreatest", 15],
+    ["ninetyninety", 15], ["pigeon", 30, "s"], ["deepsquat", 30, "s"], ["anklerocks", 15], ["rollingback", 15], ["hipcars", 15],
+    ["scorpion", 15], ["rockbacks", 15, "s"], ["scorpionreach", 15], ["downdog", 30, "s"]].map(([id, amount, u]) => ({ id, amount, unit: u === "s" ? "s" : "Wdh" }))
+};
+
+export const slotOf = item => item.slot || item.id;
+export const planOf = state => (state && state.plan) || DEFAULT_PLAN;
+export const planItems = plan => Object.values(plan.workouts).flatMap(w => w.items);
+
+// Standardwerte, wenn eine Übung neu hinzukommt
+export function defaultsFor(id, plan) {
+  const found = plan && planItems(plan).find(i => i.id === id);
+  if (found) return { sets: found.sets, reps: found.reps.slice() };
+  const ex = EXERCISES[id];
+  if (ex.mob) return ex.type === "time" ? { sets: 1, reps: [30, 30] } : { sets: 1, reps: [10, 15] };
+  return ex.type === "time" ? { sets: 3, reps: [20, 40] } : { sets: 3, reps: [8, 12] };
 }
 
-// Woche im Plan (1–8) aus Startdatum (Montag) und Datum; null = vor Start; >8 = Plan vorbei
+// Prüft einen Plan (aus dem Planer, von Claude oder der Bearbeitung). Gibt { plan } oder { error } zurück.
+export function validatePlan(p) {
+  const err = m => ({ error: m });
+  const str = (v, max) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
+  const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  if (!p || typeof p !== "object") return err("Kein Plan.");
+  if (!str(p.name, 60)) return err("Name fehlt oder ist zu lang.");
+  if (!int(p.weeks, 1, 16)) return err("Wochen: 1 bis 16.");
+  const out = { name: p.name.trim(), goal: typeof p.goal === "string" ? p.goal.slice(0, 300) : "", weeks: p.weeks, days: [], workouts: {}, runs: {}, focus: [], mobility: [] };
+  if (!p.workouts || typeof p.workouts !== "object" || Object.keys(p.workouts).length > 10) return err("Krafteinheiten fehlen oder zu viele.");
+  for (const [k, w] of Object.entries(p.workouts)) {
+    if (!/^[a-zA-Z0-9]{1,20}$/.test(k) || !w || !str(w.title, 60) || !Array.isArray(w.items) || w.items.length > 20) return err("Einheit „" + k + "“ ist ungültig.");
+    const slots = new Set(), items = [];
+    for (const i of w.items) {
+      if (!i || !EXERCISES[i.id] || !int(i.sets, 0, 10) || !Array.isArray(i.reps) || !int(i.reps[0], 1, 900) || !int(i.reps[1], i.reps[0], 900)) return err("Übung in „" + w.title + "“ ist ungültig: " + (i && i.id));
+      const slot = i.slot && /^[a-zA-Z0-9]{1,24}$/.test(i.slot) ? i.slot : i.id;
+      if (slots.has(slot)) return err("Übung doppelt in „" + w.title + "“: " + EXERCISES[i.id].name);
+      slots.add(slot);
+      items.push(slot === i.id ? { id: i.id, sets: i.sets, reps: [i.reps[0], i.reps[1]] } : { id: i.id, slot, sets: i.sets, reps: [i.reps[0], i.reps[1]] });
+    }
+    out.workouts[k] = { title: w.title.trim(), sub: typeof w.sub === "string" ? w.sub.slice(0, 80) : "", minutes: typeof w.minutes === "string" ? w.minutes.slice(0, 20) : "", items };
+  }
+  for (const [k, r] of Object.entries(p.runs || {})) {
+    if (!/^[a-zA-Z0-9]{1,20}$/.test(k) || !r || !str(r.title, 60) || !r.weeks || typeof r.weeks !== "object") return err("Lauf „" + k + "“ ist ungültig.");
+    const weeks = {};
+    for (const [n, v] of Object.entries(r.weeks)) {
+      if (!int(Number(n), 1, 16) || !v || !str(v.short, 80) || !Array.isArray(v.steps) || !v.steps.length || v.steps.length > 30) return err("Lauf „" + r.title + "“, Woche " + n + " ist ungültig.");
+      const steps = v.steps.map(s => ({ label: String(s.label || "").slice(0, 60), detail: String(s.detail || "").slice(0, 240), ...(s.min > 0 ? { min: Number(s.min) } : {}), ...(s.km > 0 ? { km: Number(s.km) } : {}), ...(s.hard ? { hard: true } : {}) }));
+      if (steps.some(s => !s.label)) return err("Lauf „" + r.title + "“: Schritt ohne Namen.");
+      weeks[String(Number(n))] = { short: v.short.trim(), ...(v.km > 0 ? { km: Number(v.km) } : {}), steps };
+    }
+    if (!Object.keys(weeks).length) return err("Lauf „" + r.title + "“ hat keine Wochen.");
+    out.runs[k] = { title: r.title.trim(), zone: int(r.zone, 1, 5) ? r.zone : 2, rpe: typeof r.rpe === "string" ? r.rpe.slice(0, 20) : "", tips: (Array.isArray(r.tips) ? r.tips : []).slice(0, 6).map(t => String(t).slice(0, 160)), weeks };
+  }
+  if (!Array.isArray(p.days) || p.days.length !== 7) return err("Es braucht genau 7 Wochentage.");
+  for (const d of p.days) {
+    if (!d || !["strength", "run", "recovery", "rest"].includes(d.kind)) return err("Ungültiger Wochentag.");
+    if (d.kind === "strength" && !out.workouts[d.workout]) return err("Wochentag verweist auf unbekannte Krafteinheit.");
+    if (d.kind === "run" && !out.runs[d.run]) return err("Wochentag verweist auf unbekannten Lauf.");
+    out.days.push(d.kind === "strength" ? { kind: d.kind, workout: d.workout } : d.kind === "run" ? { kind: d.kind, run: d.run } : { kind: d.kind });
+  }
+  for (const f of Array.isArray(p.focus) ? p.focus.slice(0, 16) : []) {
+    if (!f || !int(f.from, 1, 16) || !int(f.to, f.from, 16)) return err("Steigerung (focus) ist ungültig.");
+    out.focus.push({ from: f.from, to: f.to, rir: String(f.rir || "").slice(0, 10), text: String(f.text || "").slice(0, 140), ...(f.deload ? { deload: true } : {}) });
+  }
+  for (const m of Array.isArray(p.mobility) ? p.mobility.slice(0, 30) : []) {
+    if (!m || !EXERCISES[m.id] || !int(m.amount, 1, 600)) return err("Mobility-Übung ist ungültig.");
+    out.mobility.push({ id: m.id, amount: m.amount, unit: m.unit === "s" ? "s" : "Wdh" });
+  }
+  return { plan: out };
+}
+
+// Unterschiede zweier Planversionen in Worten (für den Versionsverlauf)
+export function diffPlans(a, b) {
+  const out = [];
+  if (a.name !== b.name) out.push("Name: " + a.name + " → " + b.name);
+  if (a.weeks !== b.weeks) out.push("Dauer: " + a.weeks + " → " + b.weeks + " Wochen");
+  for (const [k, w] of Object.entries(b.workouts)) {
+    const old = a.workouts[k];
+    if (!old) { out.push("Neue Einheit: " + w.title); continue; }
+    const om = new Map(old.items.map(i => [slotOf(i), i])), nm = new Map(w.items.map(i => [slotOf(i), i]));
+    for (const [s, i] of nm) {
+      const o = om.get(s);
+      if (!o) out.push(w.title + ": + " + EXERCISES[i.id].name);
+      else {
+        if (o.id !== i.id) out.push(w.title + ": " + EXERCISES[o.id].name + " → " + EXERCISES[i.id].name);
+        if (o.sets !== i.sets) out.push(EXERCISES[i.id].name + ": " + o.sets + " → " + i.sets + " Sätze");
+        if (o.reps[0] !== i.reps[0] || o.reps[1] !== i.reps[1]) out.push(EXERCISES[i.id].name + ": " + o.reps.join("–") + " → " + i.reps.join("–") + (EXERCISES[i.id].type === "time" ? " s" : " Wdh."));
+      }
+    }
+    for (const [s, o] of om) if (!nm.has(s)) out.push(w.title + ": − " + EXERCISES[o.id].name);
+    const oo = old.items.map(slotOf).filter(s => nm.has(s)).join(), no = w.items.map(slotOf).filter(s => om.has(s)).join();
+    if (oo !== no) out.push(w.title + ": Reihenfolge geändert");
+  }
+  for (const k of Object.keys(a.workouts)) if (!b.workouts[k]) out.push("Einheit entfernt: " + a.workouts[k].title);
+  if (JSON.stringify(a.days) !== JSON.stringify(b.days)) out.push("Wochenablauf geändert");
+  if (JSON.stringify(a.runs) !== JSON.stringify(b.runs)) out.push("Läufe geändert");
+  if (JSON.stringify(a.mobility) !== JSON.stringify(b.mobility)) out.push("Mobility geändert");
+  if (JSON.stringify(a.focus) !== JSON.stringify(b.focus)) out.push("Steigerung geändert");
+  return out;
+}
+
+export function focusFor(plan, week) {
+  return (plan.focus || []).find(f => week >= f.from && week <= f.to) || { rir: "1–3", text: "Sauber trainieren, 1–3 Wiederholungen im Tank" };
+}
+export function runFor(plan, key, week) {
+  const r = plan.runs[key];
+  const n = Object.keys(r.weeks).map(Number).filter(x => x <= week).sort((a, b) => b - a)[0] || Math.min(...Object.keys(r.weeks).map(Number));
+  return { title: r.title, zone: r.zone, rpe: r.rpe, tips: r.tips, ...r.weeks[String(n)] };
+}
+
+// Woche im Plan (1–n) aus Startdatum (Montag) und Datum; null = vor Start
 export function weekOf(startIso, dateIso) {
   const d = (Date.parse(dateIso + "T12:00:00Z") - Date.parse(startIso + "T12:00:00Z")) / 86400000;
   if (isNaN(d) || d < 0) return null;
@@ -187,32 +279,41 @@ export function weekOf(startIso, dateIso) {
 }
 export function dayIndex(dateIso) { return (new Date(dateIso + "T12:00:00Z").getUTCDay() + 6) % 7; }
 
-// Was steht an diesem Tag an – mit Anpassungen (overrides) und Status (krank, Einschränkungen)
-export function sessionFor(dateIso, state) {
-  const week = Math.min(8, weekOf(state.start, dateIso) || 1);
+// Was steht an diesem Tag an – mit Anpassungen (overrides). Änderungen nur für diesen Tag (today) kommen aus dem Protokoll.
+export function sessionFor(dateIso, state, today) {
+  const plan = planOf(state);
+  const week = Math.min(plan.weeks, weekOf(state.start, dateIso) || 1);
   const di = dayIndex(dateIso);
-  const day = WEEK[di];
+  const day = plan.days[di];
   const ov = state.overrides || {};
-  const base = { date: dateIso, week, day: di, dayName: DAY_NAMES[di], kind: day.kind };
+  const base = { date: dateIso, week, weeks: plan.weeks, day: di, dayName: DAY_NAMES[di], kind: day.kind };
   if (day.kind === "strength") {
-    const w = WORKOUTS[day.workout];
-    const focus = strengthFocus(week);
+    const w = plan.workouts[day.workout];
+    const focus = { ...focusFor(plan, week) };
     if (!focus.deload && (ov.deload || []).includes(week)) Object.assign(focus, { deload: true, rir: "3", text: "Leichtere Woche (Deload) – ein Satz weniger, leichter" });
-    const items = w.items.filter(([id]) => !(ov.ex && ov.ex[id] && ov.ex[id].sets === 0)).map(([id, sets, reps]) => {
-      const o = (ov.ex && ov.ex[id]) || {};
-      const useId = o.swap && EXERCISES[o.swap] ? o.swap : id;
+    const t = today || {};
+    const mk = (slot, planId, sets, reps, extra) => {
+      const o = (!extra && ov.ex && ov.ex[slot]) || {};
+      let useId = o.swap && EXERCISES[o.swap] ? o.swap : planId;
+      const todaySwap = t.swap && t.swap[slot] && EXERCISES[t.swap[slot]] ? t.swap[slot] : null;
+      if (todaySwap) useId = todaySwap;
       const ex = EXERCISES[useId];
       let s = Number.isInteger(o.sets) ? o.sets : sets;
-      if (focus.deload) s = Math.max(1, s - 1);
-      return { slot: id, id: useId, name: ex.name, hint: ex.hint || "", type: ex.type || "reps", side: !!ex.side, sets: s,
-        reps: Array.isArray(o.reps) ? o.reps : reps, rest: ex.rest || 60, weight: Number(o.weight) || 0, note: o.note || "", swapped: useId !== id };
-    });
+      if (focus.deload && !extra) s = Math.max(1, s - 1);
+      let r = Array.isArray(o.reps) ? o.reps : reps;
+      if (todaySwap || o.swap) { const d = defaultsFor(useId, plan); if (EXERCISES[planId].type !== ex.type) r = d.reps; }
+      return { slot, id: useId, planId, name: ex.name, hint: ex.hint || "", type: ex.type || "reps", side: !!ex.side, sets: s,
+        reps: r, rest: ex.rest || 45, weight: o.weight || 0, note: o.note || "", swapped: useId !== planId, swappedToday: !!todaySwap, extra: !!extra,
+        skipped: !!(t.skip && t.skip[slot]) };
+    };
+    const items = w.items.filter(i => !(ov.ex && ov.ex[slotOf(i)] && ov.ex[slotOf(i)].sets === 0)).map(i => mk(slotOf(i), i.id, i.sets, i.reps, false));
+    for (const x of (t.extra || [])) if (EXERCISES[x.id]) items.push(mk(x.slot, x.id, x.sets, x.reps, true));
     return { ...base, workout: day.workout, title: w.title, sub: w.sub, minutes: w.minutes, focus, items };
   }
   if (day.kind === "run") {
-    const r = runFor(day.run, week);
-    const o = (ov.run && ov.run[day.run]) || {};
-    return { ...base, run: day.run, ...r, note: o.note || "" };
+    const r = runFor(plan, day.run, week);
+    return { ...base, run: day.run, ...r };
   }
-  return { ...base, title: "Aktive Erholung", sub: "Mobility + Spaziergang", items: MOBILITY.map(([id, n, u]) => ({ id, name: EXERCISES[id].name, amount: n, unit: u === "s" ? "s" : "Wdh", side: !!EXERCISES[id].side })) };
+  if (day.kind === "rest") return { ...base, title: "Ruhetag", sub: "Erholung – Spaziergang oder Mobility, wenn du magst", items: [] };
+  return { ...base, title: "Aktive Erholung", sub: "Mobility + Spaziergang", items: plan.mobility.map(m => ({ id: m.id, name: EXERCISES[m.id].name, amount: m.amount, unit: m.unit, side: !!EXERCISES[m.id].side })) };
 }
