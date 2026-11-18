@@ -59,6 +59,12 @@ await page.evaluate(async () => {
 });
 await page.goto(base + "/#/heute"); await page.reload(); await page.waitForSelector(".hero");
 await shot("04-heute", true);
+await page.click("[data-day='2026-11-18']"); await page.waitForTimeout(200);
+if (!(await page.textContent(".hero")).includes("Beinpresse")) fail("Kurzfassung für gewählten Tag fehlt");
+await shot("04b-heute-mittwoch");
+await page.click("[data-day='2026-11-20']"); await page.waitForTimeout(200);
+await shot("04c-heute-freitag");
+await page.click("[data-day='2026-11-17']");
 if (!(await page.textContent("body")).includes("Klimmzüge: steigern")) fail("Empfehlung 'steigern' fehlt");
 
 await page.goto(base + "/#/tag/2026-11-21"); await page.waitForSelector(".ex");

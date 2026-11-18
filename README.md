@@ -5,7 +5,7 @@ Läuft kostenlos auf Cloudflare Workers mit einer D1-Datenbank. Nur für eine Pe
 
 ## Funktionen
 
-- **Heute**: Einheit des Tages, Woche X von 8, Vorschläge des Coachs, optionale Morgen-Mobility, Wochenübersicht
+- **Heute**: Woche X von Y, Wochenleiste zum Antippen – darunter steht kurz, was am gewählten Tag ansteht (Übungen mit Sätzen × Wiederholungen bzw. Laufablauf); Vorschläge des Coachs, optionale Morgen-Mobility
 - **Krafttraining**: jede Übung mit kurzer Strichfiguren-Animation und 3 Ausführungs-Hinweisen; Sätze mit Wiederholungen und Gewicht abhaken; danach startet der Pausen-Timer (Ton + Vibration); Halte-Übungen (Plank, L-Sit …) mit Countdown, bei „je Seite“ automatisch zweimal; „Letztes Mal“ als Orientierung
 - **Laufen**: Anweisungen je Woche (Zone 2, Intervalle, langer Lauf), Pulszonen, Schritte abhaken, optional Dauer/Distanz/Puls eintragen
 - **Erholung / Mobility**: 16 Übungen mit Animation, Timer und Haken, Spaziergang

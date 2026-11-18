@@ -91,44 +91,63 @@ window.scrollToTop = () => window.scrollTo(0, 0);
 function viewToday() {
   const today = todayIso(), ps = planState();
   const week = weekOf(S.start, today);
-  const log = mainLog(today);
-  const s = plannedSession(today, ps, log && log.data && log.data.today);
   const P = S.plan.data;
+  const mon = addDays(today, -dayIndex(today));
+  if (!ui.selDay || ui.selDay < mon || ui.selDay > addDays(mon, 6)) ui.selDay = today;
+  const day = ui.selDay, isToday = day === today;
+  const log = mainLog(day);
+  const s = plannedSession(day, ps, log && log.data && log.data.today);
   const sugs = suggestions(ps, today);
   const st = S.status || {};
   const chips = [];
   if (st.sick) chips.push(`<span class="badge warn">${esc(SICK[st.sick.level].label)} seit ${fmtDate(st.sick.since)}</span>`);
   for (const l of st.limits || []) chips.push(`<span class="badge warn">Einschränkung: ${esc(REGIONS[l.region])}</span>`);
-  const heroKind = s.blocked ? "blocked" : s.kind;
+  const heroKind = s.blocked && isToday ? "blocked" : s.kind;
   const doneTxt = log ? (log.status === "done" ? "✓ Erledigt" : log.status === "skipped" ? "Ausgelassen" : "Angefangen") : "";
   const sub = s.kind === "strength" ? s.sub + (s.minutes ? " · " + s.minutes + " Min." : "") : s.kind === "run" ? s.short : s.sub;
   const mob = logById(today + "-mob");
   let weekHtml = "";
-  const mon = addDays(today, -dayIndex(today));
   for (let i = 0; i < 7; i++) {
     const d = addDays(mon, i), l = mainLog(d), k = P.days[i].kind;
     const cls = l && l.status === "done" ? "done" : l && l.status === "skipped" ? "skip" : "";
-    weekHtml += `<a href="#/tag/${d}" class="${d === today ? "today" : ""}"><span class="mute">${DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span></a>`;
+    weekHtml += `<button data-day="${d}" class="${d === day ? "sel" : ""} ${d === today ? "today" : ""}" aria-pressed="${d === day}"><span class="mute">${DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span></button>`;
   }
   $app.innerHTML = `
     <p class="mute small" style="margin:0">${esc(longDate(today))}</p>
     <h1>${week == null ? "Plan startet am " + fmtDate(S.start) : week > P.weeks ? "Plan geschafft 🎉" : "Woche " + week + " von " + P.weeks}</h1>
     <p class="mute small" style="margin:0 0 14px">${esc(P.name)} · Version ${S.plan.version}${week && week <= P.weeks ? " · " + esc(focusFor(P, week).text) : ""}</p>
     ${chips.length ? `<div class="row wrap" style="margin-bottom:12px">${chips.join("")}</div>` : ""}
+    <div class="weekstrip" style="margin-bottom:12px">${weekHtml}</div>
     <div class="hero ${heroKind}">
-      <div class="k">Heute · ${esc(KIND_LABEL[s.kind])}</div>
+      <div class="k">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}</div>
       <h2>${esc(s.title)}</h2>
       <p>${esc(sub)}</p>
-      ${doneTxt ? `<span class="done">${doneTxt}</span> ` : ""}<a class="btn" href="#/tag/${today}">${log ? "Öffnen" : s.blocked ? "Ansehen" : "Starten"}</a>
+      ${shortPreview(s)}
+      ${doneTxt ? `<span class="done">${doneTxt}</span> ` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
     </div>
-    ${s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("")}
+    ${isToday ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}
     ${sugs.length ? `<h2>Vorschläge für dich</h2>` + sugs.map(sugCard).join("") : ""}
     <a class="card row" href="#/tag/${today}/mob" style="text-decoration:none;color:inherit">
       <span class="dot recovery"></span><div class="grow"><b>Morgenroutine Mobility</b><div class="mute small">optional · 10–15 Min.</div></div>
-      ${mob && mob.status === "done" ? `<span class="ok">✓</span>` : `<span class="mute">›</span>`}</a>
-    <h2>Diese Woche</h2>
-    <div class="weekstrip">${weekHtml}</div>`;
+      ${mob && mob.status === "done" ? `<span class="ok">✓</span>` : `<span class="mute">›</span>`}</a>`;
+  $app.querySelectorAll("[data-day]").forEach(b => b.addEventListener("click", () => { ui.selDay = b.dataset.day; render(); }));
   bindSuggestions(sugs);
+}
+// Kurzfassung einer Einheit für die Startseite
+function shortPreview(s) {
+  if (s.kind === "strength") {
+    const list = s.items.filter(i => !i.skipped);
+    return `<ul class="mini">${list.map(i => `<li><span>${esc(i.name)}</span><span>${i.sets} × ${i.reps[0]}–${i.reps[1]}${i.type === "time" ? " s" : ""}</span></li>`).join("")}</ul>`;
+  }
+  if (s.kind === "run") {
+    const st = s.steps, hard = st.filter(x => x.hard), pause = st.find(x => !x.hard && /pause/i.test(x.label));
+    const parts = hard.length
+      ? [st[0].label + " " + st[0].min + " Min.", hard.length + " × " + hard[0].min + " Min. schnell" + (pause ? " (" + pause.min + " Min. Trabpause)" : ""), st[st.length - 1].label + " " + st[st.length - 1].min + " Min."]
+      : st.map(x => x.detail);
+    return `<ul class="mini">${parts.map(t => `<li><span>${esc(t)}</span></li>`).join("")}</ul>`;
+  }
+  if (s.kind === "recovery") return `<ul class="mini"><li><span>${s.items.length} Mobility-Übungen (15–20 Min.)</span></li><li><span>Spaziergang</span></li></ul>`;
+  return "";
 }
 function sugCard(s, i) {
   const label = { stop: "Wichtig", warn: "Anpassung", good: "Fortschritt", info: "Hinweis" }[s.level];
@@ -802,7 +821,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.2.0</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.2.1</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
