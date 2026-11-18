@@ -127,7 +127,9 @@ function viewToday() {
       <p>${esc(sub)}</p>
       ${shortPreview(s)}
       <div class="row wrap">${doneTxt ? `<span class="done">${doneTxt}</span>` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
-      <button class="btn swap" id="swapDay">Tag tauschen</button></div>
+      ${log && log.status === "skipped" ? `<button class="btn swap" id="unskipDay">Doch trainieren</button>` : ""}
+      ${!log && s.kind !== "rest" ? `<button class="btn swap" id="skipDayHome">Auslassen</button>` : ""}
+      ${!log ? `<button class="btn swap" id="swapDay">Tag tauschen</button>` : ""}</div>
     </div>
     ${isToday ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}
     ${sugs.length ? `<h2>Vorschläge für dich</h2>` + sugs.map(sugCard).join("") : ""}
@@ -136,7 +138,26 @@ function viewToday() {
       ${mob && mob.status === "done" ? `<span class="ok">✓</span>` : `<span class="mute">›</span>`}</a>`;
   $app.querySelectorAll("[data-day]").forEach(b => b.addEventListener("click", () => { ui.selDay = b.dataset.day; render(); }));
   const tt = $app.querySelector("#toToday"); if (tt) tt.addEventListener("click", () => { ui.selDay = today; render(); });
-  $app.querySelector("#swapDay").addEventListener("click", () => swapSheet(day, mon));
+  const sw = $app.querySelector("#swapDay"); if (sw) sw.addEventListener("click", () => swapSheet(day, mon));
+  const sk = $app.querySelector("#skipDayHome");
+  if (sk) sk.addEventListener("click", () => {
+    const bg = sheet(`<h2 style="margin-top:0">${esc(s.title)} auslassen?</h2>
+      <p class="mute small" style="margin-top:-6px">${esc(isToday ? "Heute" : DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} wird als ausgelassen eingetragen. Du kannst das jederzeit rückgängig machen.</p>
+      <label class="f">Grund (optional)</label>
+      <div class="row wrap">${["Keine Zeit", "Müde / erschöpft", "Krank", "Schmerzen", "Bewusste Pause"].map(r => `<span class="chip" data-r="${r}">${r}</span>`).join("")}</div>
+      <button class="btn full" id="skipOk" style="margin-top:16px">Auslassen</button><button class="btn ghost full" id="skipNo" style="margin-top:6px">Abbrechen</button>`);
+    let reason = "";
+    bg.querySelectorAll("[data-r]").forEach(c => c.addEventListener("click", () => { reason = reason === c.dataset.r ? "" : c.dataset.r; bg.querySelectorAll("[data-r]").forEach(x => x.classList.toggle("on", x.dataset.r === reason)); }));
+    bg.querySelector("#skipNo").addEventListener("click", () => bg.remove());
+    bg.querySelector("#skipOk").addEventListener("click", async () => {
+      try { await saveLog({ id: day + "-main", date: day, kind: s.kind === "rest" ? "other" : s.kind, status: "skipped", data: reason ? { reason, pv: planRef() } : { pv: planRef() } }); bg.remove(); toast("Ausgelassen"); render(); }
+      catch (e) { toast(e.message); }
+    });
+  });
+  const us = $app.querySelector("#unskipDay");
+  if (us) us.addEventListener("click", async () => {
+    try { await api("/api/log/delete", { id: day + "-main" }); S.logs = S.logs.filter(l => l.id !== day + "-main"); toast("Wieder offen"); render(); } catch (e) { toast(e.message); }
+  });
   bindSuggestions(sugs);
 }
 // Tage innerhalb der laufenden Woche tauschen – ohne neue Planversion
@@ -851,7 +872,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.3.1</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.3.2</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;

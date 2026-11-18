@@ -6,7 +6,7 @@ import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, random
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.3.1";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.3.2";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

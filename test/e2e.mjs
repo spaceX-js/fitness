@@ -84,6 +84,11 @@ await shot("04e-getauscht");
 if (await page.evaluate(() => document.documentElement.scrollWidth) > 390) fail("Startseite breiter als der iPhone-Bildschirm");
 const versions = await page.evaluate(() => fetch("/api/state").then(r => r.json()).then(j => j.plans.length));
 if (versions !== 1) fail("Tauschen hat eine Planversion erzeugt");
+// Auslassen auf der Startseite und rückgängig
+await page.click("#skipDayHome"); await page.click("[data-r='Keine Zeit']"); await shot("04g-auslassen"); await page.click("#skipOk"); await page.waitForTimeout(400);
+if (!(await page.textContent(".hero")).includes("Ausgelassen")) fail("Auslassen auf der Startseite geht nicht");
+await page.click("#unskipDay"); await page.waitForTimeout(400);
+if (!(await page.$("#skipDayHome"))) fail("Rückgängig geht nicht");
 await page.click("#swapDay"); await page.waitForTimeout(300); await shot("04f-sheet"); await page.click("#resetWeek", { timeout: 5000 }); await page.waitForTimeout(400);
 if (!(await page.textContent("body")).includes("Klimmzüge: steigern")) fail("Empfehlung 'steigern' fehlt");
 
