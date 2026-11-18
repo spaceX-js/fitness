@@ -1,5 +1,5 @@
 // Fitness – Oberfläche. Läuft nur nach Anmeldung; Daten kommen von /api (Cloudflare Worker + D1).
-import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
+import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, sourceDay, swapDays, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
 import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK } from "./coach.js";
 import { mount, still } from "./anim.js";
 
@@ -38,7 +38,7 @@ let loadedAt = 0;
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return flush();
   // Zurück in der App (z. B. am nächsten Tag): Daten frisch laden, aber nicht mitten im Eintragen
-  if (Date.now() - loadedAt > 60000 && !pending && !document.querySelector(".sheet-bg")) load().then(render).catch(() => {});
+  if (Date.now() - loadedAt > 60000 && !pending && !document.querySelector(".sheet-bg")) { ui.selDay = null; load().then(render).catch(() => {}); }
 });
 
 /* ---------- Hilfen ---------- */
@@ -79,6 +79,7 @@ function render() {
   keepAwake(r[0] === "tag");
   if (rest && location.hash !== rest.hash) stopRest();
   if (r[0] === "tag" && /^\d{4}-\d{2}-\d{2}$/.test(r[1] || "")) return r[2] === "mob" ? viewMobility(r[1], true) : viewDay(r[1]);
+  if (r[0] !== "heute") ui.selDay = null;
   if (r[0] === "plan") return r[1] === "bearbeiten" ? viewPlanEdit() : r[1] === "versionen" ? viewVersions() : r[1] === "archiv" ? viewArchive()
     : r[1] === "planer" ? viewPlanner() : r[1] === "ansehen" ? viewPlanById(Number(r[2])) : viewPlan();
   if (r[0] === "statistik") return viewStats();
@@ -93,7 +94,7 @@ function viewToday() {
   const week = weekOf(S.start, today);
   const P = S.plan.data;
   const mon = addDays(today, -dayIndex(today));
-  if (!ui.selDay || ui.selDay < mon || ui.selDay > addDays(mon, 6)) ui.selDay = today;
+  if (!ui.selDay || ui.selDay < mon || ui.selDay > addDays(mon, 6)) ui.selDay = today;   // Standard: heute
   const day = ui.selDay, isToday = day === today;
   const log = mainLog(day);
   const s = plannedSession(day, ps, log && log.data && log.data.today);
@@ -108,9 +109,10 @@ function viewToday() {
   const mob = logById(today + "-mob");
   let weekHtml = "";
   for (let i = 0; i < 7; i++) {
-    const d = addDays(mon, i), l = mainLog(d), k = P.days[i].kind;
+    const d = addDays(mon, i), l = mainLog(d), src = sourceDay(ps, d), k = P.days[src].kind;
     const cls = l && l.status === "done" ? "done" : l && l.status === "skipped" ? "skip" : "";
-    weekHtml += `<button data-day="${d}" class="${d === day ? "sel" : ""} ${d === today ? "today" : ""}" aria-pressed="${d === day}"><span class="mute">${DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span></button>`;
+    weekHtml += `<button data-day="${d}" class="${d === day ? "sel" : ""} ${d === today ? "today" : ""} ${src !== i ? "moved" : ""}" aria-pressed="${d === day}" aria-label="${DAY_NAMES[i]}${d === today ? " (heute)" : ""}">
+      <span class="lbl">${d === today ? "Heute" : DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span>${src !== i ? `<span class="mv">↔</span>` : ""}</button>`;
   }
   $app.innerHTML = `
     <p class="mute small" style="margin:0">${esc(longDate(today))}</p>
@@ -119,11 +121,13 @@ function viewToday() {
     ${chips.length ? `<div class="row wrap" style="margin-bottom:12px">${chips.join("")}</div>` : ""}
     <div class="weekstrip" style="margin-bottom:12px">${weekHtml}</div>
     <div class="hero ${heroKind}">
-      <div class="k">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}</div>
+      <div class="row"><div class="k grow">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}${s.movedFrom != null ? " · getauscht mit " + esc(DAY_NAMES[s.movedFrom]) : ""}</div>
+        ${isToday ? "" : `<button class="pill" id="toToday">Zu heute</button>`}</div>
       <h2>${esc(s.title)}</h2>
       <p>${esc(sub)}</p>
       ${shortPreview(s)}
-      ${doneTxt ? `<span class="done">${doneTxt}</span> ` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
+      <div class="row wrap">${doneTxt ? `<span class="done">${doneTxt}</span>` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
+      <button class="btn swap" id="swapDay">Tag tauschen</button></div>
     </div>
     ${isToday ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}
     ${sugs.length ? `<h2>Vorschläge für dich</h2>` + sugs.map(sugCard).join("") : ""}
@@ -131,7 +135,33 @@ function viewToday() {
       <span class="dot recovery"></span><div class="grow"><b>Morgenroutine Mobility</b><div class="mute small">optional · 10–15 Min.</div></div>
       ${mob && mob.status === "done" ? `<span class="ok">✓</span>` : `<span class="mute">›</span>`}</a>`;
   $app.querySelectorAll("[data-day]").forEach(b => b.addEventListener("click", () => { ui.selDay = b.dataset.day; render(); }));
+  const tt = $app.querySelector("#toToday"); if (tt) tt.addEventListener("click", () => { ui.selDay = today; render(); });
+  $app.querySelector("#swapDay").addEventListener("click", () => swapSheet(day, mon));
   bindSuggestions(sugs);
+}
+// Tage innerhalb der laufenden Woche tauschen – ohne neue Planversion
+function swapSheet(day, mon) {
+  const ps = planState(), s0 = plannedSession(day, ps);
+  if (mainLog(day)) return toast("Für " + DAY_NAMES[dayIndex(day)] + " ist schon etwas eingetragen – erst zurücksetzen, dann tauschen.");
+  const others = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(mon, i)).filter(d => d !== day);
+  const m = (S.overrides.moves || {})[mon];
+  const bg = sheet(`<h2 style="margin-top:0">${esc(DAY_NAMES[dayIndex(day)])}: ${esc(s0.title)}</h2>
+    <p class="mute small" style="margin-top:-6px">Tauschen mit … (nur diese Woche, der Plan bleibt gleich)</p>
+    <div class="list">${others.map(d => { const s = plannedSession(d, ps), busy = !!mainLog(d);
+      return `<button class="pickday" data-to="${d}" ${busy ? "disabled" : ""}><span class="dot ${s.kind === "rest" ? "recovery" : s.kind}"></span><div class="grow"><b>${DAY_NAMES[dayIndex(d)]}</b> <span class="mute small">${fmtDate(d)}</span><div class="small">${esc(s.title)}${busy ? " · <span class=\"mute\">schon eingetragen</span>" : ""}</div></div><span class="mute">↔</span></button>`; }).join("")}</div>
+    ${Array.isArray(m) ? `<button class="btn ghost full" id="resetWeek" style="margin-top:10px">Woche wieder wie im Plan</button>` : ""}`);
+  const save = async ov => { try { await saveSettings({ overrides: ov }); bg.remove(); render(); } catch (e) { toast(e.message); } };
+  bg.querySelectorAll("[data-to]").forEach(b => b.addEventListener("click", async () => {
+    await save(swapDays(S.overrides, day, b.dataset.to)); ui.selDay = todayIso(); render();
+    toast(s0.title + " jetzt am " + DAY_NAMES[dayIndex(b.dataset.to)]);
+  }));
+  const rw = bg.querySelector("#resetWeek");
+  if (rw) rw.addEventListener("click", async () => {
+    const ov = JSON.parse(JSON.stringify(S.overrides)); delete ov.moves[mon];
+    const busy = [0, 1, 2, 3, 4, 5, 6].some(i => { const d = addDays(mon, i); return mainLog(d) && sourceDay(planState(), d) !== i; });
+    if (busy && !window.confirm("An getauschten Tagen ist schon etwas eingetragen. Trotzdem zurücksetzen?")) return;
+    await save(ov); toast("Woche wieder wie im Plan");
+  });
 }
 // Kurzfassung einer Einheit für die Startseite
 function shortPreview(s) {
@@ -821,7 +851,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.2.1</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.3.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;

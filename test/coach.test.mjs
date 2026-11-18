@@ -1,7 +1,7 @@
 // Tests für Plan und Coach-Regeln (laufen ohne Browser)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sessionFor, runFor, weekOf, EXERCISES, DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
+import { sessionFor, runFor, weekOf, EXERCISES, DEFAULT_PLAN, validatePlan, diffPlans, swapDays } from "../public/plan.js";
 import { suggestions, applyOp, plannedSession } from "../public/coach.js";
 import { ANIMS } from "../public/anim.js";
 
@@ -99,4 +99,15 @@ test("Nur heute: überspringen, ersetzen, zusätzliche Übung", () => {
   assert.equal(x.id, "plank"); assert.equal(x.extra, true);
   // ohne heutige Änderungen alles wie im Plan
   assert.equal(sessionFor("2026-11-16", base).items.length, 8);
+});
+
+test("Tage in der Woche tauschen, ohne den Plan zu ändern", () => {
+  const ov = swapDays({}, "2026-11-18", "2026-11-17");    // Fitnessstudio Mi → Di
+  assert.deepEqual(ov.moves["2026-11-16"], [0, 2, 1, 3, 4, 5, 6]);
+  const st = { ...base, overrides: ov };
+  assert.equal(sessionFor("2026-11-17", st).title, "Fitnessstudio");
+  assert.equal(sessionFor("2026-11-17", st).movedFrom, 2);
+  assert.equal(sessionFor("2026-11-18", st).title, "Lauf – Zone 2");
+  assert.equal(sessionFor("2026-11-24", st).title, "Lauf – Zone 2", "nächste Woche wieder normal");
+  assert.equal(swapDays(ov, "2026-11-17", "2026-11-18").moves["2026-11-16"], undefined, "zurücktauschen = wie im Plan");
 });

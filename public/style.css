@@ -111,9 +111,30 @@ svg.fig .w4{stroke-width:4}svg.fig .w5{stroke-width:5}svg.fig .w8{stroke-width:8
 input[type=search]{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-size:16px;-webkit-appearance:none;appearance:none}
 
 /* Startseite: Tag auswählen und Kurzfassung */
-.weekstrip button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0;border-radius:12px;background:var(--card);border:0;color:var(--ink);font-size:12px;box-shadow:var(--shadow);cursor:pointer}
-.weekstrip button.today .mute{color:var(--acc);font-weight:700}
-.weekstrip button.sel{outline:2px solid var(--acc)}
+.weekstrip{gap:5px}
+.weekstrip button{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:62px;padding:7px 0 6px;border-radius:14px;background:var(--card);border:2px solid transparent;color:var(--ink);font-size:12px;box-shadow:var(--shadow);cursor:pointer}
+.weekstrip .lbl{color:var(--mute);font-weight:600}
+.weekstrip button.today{background:var(--acc-soft)}
+.weekstrip button.today .lbl{color:var(--acc);font-weight:800;font-size:11.5px}
+.weekstrip button.sel{border-color:var(--acc);box-shadow:0 2px 10px color-mix(in srgb,var(--acc) 30%,transparent)}
+.weekstrip .mv{position:absolute;bottom:1px;right:4px;font-size:10px;line-height:1;color:var(--warn);font-weight:700}
+.pill{border:0;border-radius:999px;background:rgba(255,255,255,.22);color:#fff;font-weight:600;font-size:13px;padding:5px 12px;min-height:30px;cursor:pointer}
+.hero .btn.swap{background:rgba(255,255,255,.18);color:#fff}
 ul.mini{list-style:none;margin:-4px 0 14px;padding:0;font-size:14px;opacity:.95}
 ul.mini li{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.18)}
-ul.mini li:last-child{border:0}ul.mini li span:last-child{white-space:nowrap;opacity:.85}
+ul.mini li:last-child{border:0}ul.mini li span{min-width:0;overflow-wrap:anywhere}ul.mini li span+span{white-space:nowrap;opacity:.85;flex:none}
+.pickday{display:flex;align-items:center;gap:12px;width:100%;padding:12px 2px;border:0;border-bottom:1px solid var(--line);background:none;text-align:left;cursor:pointer;min-height:56px}
+.pickday:disabled{opacity:.45;cursor:default}
+
+/* iPhone: kein Doppeltipp-Zoom, keine Textvergrößerung, Ränder um Notch und Home-Leiste */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;touch-action:manipulation}
+body{overscroll-behavior-y:none;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+button,a,.chip,.check,.pick,.pickday{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.btn,.check,.timerbtn,.more,.chip{touch-action:manipulation}
+.more{width:44px;height:44px}
+.sheet{max-height:88dvh;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.restbar{bottom:calc(env(safe-area-inset-bottom) + 66px)}
+@media (max-width:380px){.weekstrip .lbl{font-size:11px}.hero h2{font-size:22px}}
+
+/* nie breiter als der Bildschirm */
+html,body{max-width:100%;overflow-x:hidden}

@@ -16,12 +16,18 @@ await new Promise(r => setTimeout(r, 800));
 const fail = (m) => { console.error("FEHLER:", m); srv.kill(); process.exit(1); };
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME || "/usr/bin/google-chrome", args: ["--no-sandbox"] });
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: process.env.DARK ? "dark" : "light", locale: "de-DE", timezoneId: "Europe/Berlin" });
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1", colorScheme: process.env.DARK ? "dark" : "light", locale: "de-DE", timezoneId: "Europe/Berlin" });
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", e => errors.push(e.message));
 page.on("console", m => { if (m.type() === "error" && !/401/.test(m.text())) errors.push(m.text()); });
-const shot = async (name, full = false) => page.screenshot({ path: `${out}/${name}.png`, fullPage: full });
+const tooWide = [];
+const shot = async (name, full = false) => {
+  const w = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, ...[...document.querySelectorAll(".sheet")].map(s => s.scrollWidth)));
+  if (w > 390) tooWide.push(name + " (" + w + " px)");
+  return page.screenshot({ path: `${out}/${name}.png`, fullPage: full });
+};
 
 await page.goto(base + "/");
 await shot("01-einrichtung");
@@ -59,12 +65,24 @@ await page.evaluate(async () => {
 });
 await page.goto(base + "/#/heute"); await page.reload(); await page.waitForSelector(".hero");
 await shot("04-heute", true);
-await page.click("[data-day='2026-11-18']"); await page.waitForTimeout(200);
-if (!(await page.textContent(".hero")).includes("Beinpresse")) fail("Kurzfassung für gewählten Tag fehlt");
-await shot("04b-heute-mittwoch");
-await page.click("[data-day='2026-11-20']"); await page.waitForTimeout(200);
-await shot("04c-heute-freitag");
-await page.click("[data-day='2026-11-17']");
+const today = new Date().toISOString().slice(0, 10);
+const mon = (() => { const d = new Date(today + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d; })();
+const dayOf = i => { const d = new Date(mon); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); };
+const other = dayOf(dayOf(2) === today ? 4 : 2);
+await page.click(`[data-day='${other}']`); await page.waitForTimeout(200);
+await shot("04b-anderer-tag");
+await page.click("#toToday"); await page.waitForTimeout(200);
+if (!(await page.textContent(".hero .k")).startsWith("Heute")) fail("Zurück zu heute geht nicht");
+// Fitnessstudio (Mi) auf Dienstag tauschen
+await page.click(`[data-day='${dayOf(2)}']`); await page.click("#swapDay"); await page.waitForTimeout(200);
+await shot("04d-tauschen");
+await page.click(`[data-to='${dayOf(1)}']`); await page.waitForTimeout(500);
+if (!(await page.textContent(".hero")).includes("Lauf")) fail("Tausch nicht angekommen (heute sollte jetzt Laufen sein)");
+await shot("04e-getauscht");
+if (await page.evaluate(() => document.documentElement.scrollWidth) > 390) fail("Startseite breiter als der iPhone-Bildschirm");
+const versions = await page.evaluate(() => fetch("/api/state").then(r => r.json()).then(j => j.plans.length));
+if (versions !== 1) fail("Tauschen hat eine Planversion erzeugt");
+await page.click("#swapDay"); await page.waitForTimeout(300); await shot("04f-sheet"); await page.click("#resetWeek", { timeout: 5000 }); await page.waitForTimeout(400);
 if (!(await page.textContent("body")).includes("Klimmzüge: steigern")) fail("Empfehlung 'steigern' fehlt");
 
 await page.goto(base + "/#/tag/2026-11-21"); await page.waitForSelector(".ex");
@@ -140,6 +158,9 @@ await shot("12-anmeldung");
 const st = await page.evaluate(() => fetch("/api/state").then(r => r.status));
 if (st !== 401) fail("API nach Abmelden noch offen");
 
+const wide = await page.evaluate(() => document.documentElement.scrollWidth);
+if (wide > 390) fail("Seite breiter als der iPhone-Bildschirm: " + wide);
+if (tooWide.length) fail("Breiter als der iPhone-Bildschirm: " + tooWide.join(", "));
 if (errors.length) fail("Fehler im Browser: " + errors.join(" | "));
 console.log("OK – Screenshots in " + out);
 await browser.close(); srv.kill();

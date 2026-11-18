@@ -1,6 +1,6 @@
 // Coach: Empfehlungen zur Anpassung des Plans – nach Leistung, Gefühl, Krankheit und Einschränkungen.
 // Reine Regeln, keine KI und kein Fremddienst. Jede Empfehlung erklärt ihren Grund und wird nur auf Knopfdruck übernommen.
-import { EXERCISES, REGIONS, sessionFor, weekOf, dayIndex, planOf, slotOf } from "./plan.js";
+import { EXERCISES, REGIONS, sessionFor, weekOf, dayIndex, planOf, slotOf, sourceDay } from "./plan.js";
 
 export const SICK = {
   head: { label: "Erkältet (nur Kopf)", text: "Schnupfen, Halskratzen – nur oberhalb des Halses" },
@@ -143,7 +143,7 @@ export function suggestions(state, today) {
     let missed = 0;
     for (let i = 1; i <= 7; i++) {
       const d = addDays(today, -i);
-      if (["recovery", "rest"].includes(plan.days[dayIndex(d)].kind)) continue;
+      if (["recovery", "rest"].includes(plan.days[sourceDay(state, d)].kind)) continue;
       if (d < state.start) continue;
       const done = (state.logs || []).some(l => l.date === d && l.status !== "skipped");
       if (!done) missed++;

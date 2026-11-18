@@ -278,15 +278,34 @@ export function weekOf(startIso, dateIso) {
   return Math.floor(d / 7) + 1;
 }
 export function dayIndex(dateIso) { return (new Date(dateIso + "T12:00:00Z").getUTCDay() + 6) % 7; }
+export function mondayIso(dateIso) { const d = new Date(dateIso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - dayIndex(dateIso)); return d.toISOString().slice(0, 10); }
+
+// Tage in einer Woche tauschen (ohne neue Planversion): overrides.moves["Montag der Woche"] = [Quelltag je Wochentag]
+export function sourceDay(state, dateIso) {
+  const di = dayIndex(dateIso), m = state && state.overrides && state.overrides.moves && state.overrides.moves[mondayIso(dateIso)];
+  return Array.isArray(m) && m.length === 7 && Number.isInteger(m[di]) && m[di] >= 0 && m[di] <= 6 ? m[di] : di;
+}
+export function swapDays(overrides, dateA, dateB) {
+  const ov = JSON.parse(JSON.stringify(overrides || {})), mon = mondayIso(dateA);
+  ov.moves = ov.moves || {};
+  const m = Array.isArray(ov.moves[mon]) && ov.moves[mon].length === 7 ? ov.moves[mon] : [0, 1, 2, 3, 4, 5, 6];
+  const a = dayIndex(dateA), b = dayIndex(dateB);
+  [m[a], m[b]] = [m[b], m[a]];
+  if (m.every((v, i) => v === i)) delete ov.moves[mon]; else ov.moves[mon] = m;
+  // alte Wochen aufräumen (älter als 5 Wochen)
+  const cut = new Date(Date.parse(mon + "T12:00:00Z") - 35 * 86400000).toISOString().slice(0, 10);
+  for (const k of Object.keys(ov.moves)) if (k < cut) delete ov.moves[k];
+  return ov;
+}
 
 // Was steht an diesem Tag an – mit Anpassungen (overrides). Änderungen nur für diesen Tag (today) kommen aus dem Protokoll.
 export function sessionFor(dateIso, state, today) {
   const plan = planOf(state);
   const week = Math.min(plan.weeks, weekOf(state.start, dateIso) || 1);
-  const di = dayIndex(dateIso);
-  const day = plan.days[di];
+  const di = dayIndex(dateIso), src = sourceDay(state, dateIso);
+  const day = plan.days[src];
   const ov = state.overrides || {};
-  const base = { date: dateIso, week, weeks: plan.weeks, day: di, dayName: DAY_NAMES[di], kind: day.kind };
+  const base = { date: dateIso, week, weeks: plan.weeks, day: di, dayName: DAY_NAMES[di], kind: day.kind, movedFrom: src !== di ? src : null };
   if (day.kind === "strength") {
     const w = plan.workouts[day.workout];
     const focus = { ...focusFor(plan, week) };
