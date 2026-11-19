@@ -7,7 +7,7 @@ import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 import { METRICS } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.5.0";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.5.1";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -192,7 +192,7 @@ async function api(request, env, settings, url, session) {
   }
   if (path === "/api/health/apply" && method === "POST") {      // Ergebnis der Auswertung aus dem Browser speichern
     const b = await readJson(request, 2000000);
-    if (!b || typeof b.batch !== "string" || !/^[a-f0-9]{16}$/.test(b.batch)) return json({ error: "Ungültige Anfrage." }, 400);
+    if (!b || (b.batch !== null && (typeof b.batch !== "string" || !/^[a-f0-9]{16}$/.test(b.batch)))) return json({ error: "Ungültige Anfrage." }, 400);
     const daily = Array.isArray(b.daily) ? b.daily.slice(0, 5000) : [], wos = Array.isArray(b.workouts) ? b.workouts.slice(0, 500) : [];
     const now = new Date().toISOString(), ops = [], f = v => (typeof v === "number" && Number.isFinite(v) ? v : null);
     for (const r of daily) if (r && isDate(r.date) && METRICS[r.metric] && Number.isFinite(r.value))
@@ -203,11 +203,10 @@ async function api(request, env, settings, url, session) {
         km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
         speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)
         .bind(x.id, x.date, String(x.start || "").slice(0, 30), String(x.end || "").slice(0, 30), String(x.kind || "Training").slice(0, 60), x.run ? 1 : 0, f(x.min), f(x.km), f(x.kcal), f(x.hr_avg), f(x.hr_max), f(x.speed), f(x.power), f(x.stride), f(x.gct), String(x.source || "").slice(0, 60), now));
-    ops.push(env.DB.prepare("DELETE FROM health_raw WHERE batch = ?").bind(b.batch));
-    for (let k = 0; k < ops.length; k += 80) await env.DB.batch(ops.slice(k, k + 80));
-    const s = cleanJson(b.summary || {}, 0) || {};
+    if (b.batch) ops.push(env.DB.prepare("DELETE FROM health_raw WHERE batch = ?").bind(b.batch));
+    for (let k = 0; k < ops.length; k += 80) if (ops.length) await env.DB.batch(ops.slice(k, k + 80));
     const left = (await env.DB.prepare("SELECT COUNT(*) AS n FROM health_raw").first()).n;
-    await saveImportLast(env, { ...s, at: now, ok: true, pending: left > 0 });
+    if (b.batch) { const s = cleanJson(b.summary || {}, 0) || {}; await saveImportLast(env, { ...s, at: now, ok: true, pending: left > 0 }); }
     return json({ ok: true, left });
   }
   if (path === "/api/health/key" && method === "POST") {      // neuen Import-Schlüssel erzeugen (wird nur einmal angezeigt)
@@ -220,7 +219,7 @@ async function api(request, env, settings, url, session) {
     return json({ ok: true });
   }
   if (path === "/api/health/delete" && method === "POST") {
-    await env.DB.batch([env.DB.prepare("DELETE FROM health_daily"), env.DB.prepare("DELETE FROM workouts"), env.DB.prepare("DELETE FROM health_raw"), env.DB.prepare("DELETE FROM settings WHERE key = 'import_last'")]);
+    await env.DB.batch([env.DB.prepare("DELETE FROM health_daily"), env.DB.prepare("DELETE FROM workouts"), env.DB.prepare("DELETE FROM health_raw"), env.DB.prepare("DELETE FROM workout_marks"), env.DB.prepare("DELETE FROM settings WHERE key = 'import_last'")]);
     return json({ ok: true });
   }
 
@@ -289,6 +288,15 @@ async function importHealth(request, env, settings) {
   // Ausgewertet wird beim nächsten Öffnen der App im Browser; dort werden nur die Ergebnisse zurückgeschickt.
   const t = await request.text();
   if (!t.trim()) return json({ error: "Keine Daten." }, 400);
+  // Kurze Meldung der Apple-Watch-Automation: {"training": "Krafttraining"} – Ende = jetzt
+  if (t.length < 2000) {
+    let b = null; try { b = JSON.parse(t); } catch (e) {}
+    if (b && typeof b === "object" && typeof b.training === "string" && b.training.trim()) {
+      const kind = b.training.replace(/[^\p{L}\p{N} \-()\/]/gu, "").trim().slice(0, 60) || "Training";
+      await env.DB.prepare("INSERT INTO workout_marks (id, kind, end_at) VALUES (?, ?, ?)").bind(randomHex(8), kind, new Date().toISOString()).run();
+      return json({ ok: true, training: kind, hinweis: "Training gespeichert." });
+    }
+  }
   if (t.length > 12000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413);
   const batch = randomHex(8), now = new Date().toISOString(), CH = 400000, parts = Math.ceil(t.length / CH), ops = [];
   for (let p = 0; p < parts; p++) ops.push(env.DB.prepare("INSERT INTO health_raw (batch, part, parts, received_at, data) VALUES (?, ?, ?, ?, ?)").bind(batch, p, parts, now, t.slice(p * CH, (p + 1) * CH)));
@@ -311,7 +319,8 @@ async function healthData(env, settings, days) {
   const daily = (await env.DB.prepare("SELECT date, metric, value FROM health_daily WHERE date >= ? ORDER BY date").bind(since).all()).results;
   const workouts = (await env.DB.prepare("SELECT id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source FROM workouts WHERE date >= ? ORDER BY start DESC").bind(since).all()).results;
   const pending = (await env.DB.prepare("SELECT COUNT(DISTINCT batch) AS n FROM health_raw").first()).n;
-  return { daily, workouts, pending, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
+  const marks = (await env.DB.prepare("SELECT id, kind, end_at AS end FROM workout_marks WHERE end_at >= ? ORDER BY end_at DESC LIMIT 200").bind(since).all()).results;
+  return { daily, workouts, marks, pending, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
 }
 
 /* ---------- Pläne ---------- */

@@ -95,3 +95,19 @@ test("Ein Wörterbuch mit allen Messungen (Typ je Zeile, deutsche Datumsangaben)
   assert.equal(v("2026-11-19", "rhr"), 60);
   assert.equal(v("2026-11-18", "steps"), undefined, "erster Tag weggelassen");
 });
+
+test("Watch-Training: Dauer aus dichtem Puls, sonst Schätzung", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const t0 = Date.parse("2026-11-17T17:00:00Z"), hr = [], st = [];
+  hr.push(70); st.push(new Date(t0 - 3600000).toISOString());          // vorher: einzelne Messung
+  for (let i = 0; i <= 50 * 6; i++) { hr.push(110 + (i % 20)); st.push(new Date(t0 + i * 10000).toISOString()); }   // 50 Min. alle 10 s
+  const text = JSON.stringify({ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") });
+  const marks = [{ id: "abc", kind: "Krafttraining", end: new Date(t0 + 51 * 60000).toISOString() }];
+  const w = processUpload(text, null, { marks }).workouts.find(x => x.id === "w_abc");
+  assert.ok(w && Math.abs(w.min - 50) < 1, "Dauer ~50 Min: " + (w && w.min));
+  assert.equal(w.start, new Date(t0).toISOString());
+  assert.ok(w.hr_avg > 110 && w.hr_max === 129);
+  const e = processUpload("", null, { marks: [{ id: "x1", kind: "Core-Training", end: new Date(t0).toISOString() }] }).workouts[0];
+  assert.equal(e.min, 15);
+  assert.equal(processUpload("", null, { marks: [{ id: "x1", kind: "Core-Training", end: new Date(t0).toISOString() }], known: ["w_x1"] }).workouts.length, 0, "vorhandenes nicht mit Schätzung überschreiben");
+});

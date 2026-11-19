@@ -71,3 +71,10 @@ CREATE TABLE IF NOT EXISTS health_raw (
   data        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS health_raw_batch ON health_raw(batch, part);
+
+-- Apple-Watch-Automation „Training beendet“: Art und Ende, die App ergänzt Dauer und Puls aus den Health-Daten
+CREATE TABLE IF NOT EXISTS workout_marks (
+  id     TEXT PRIMARY KEY,
+  kind   TEXT NOT NULL,
+  end_at TEXT NOT NULL
+);

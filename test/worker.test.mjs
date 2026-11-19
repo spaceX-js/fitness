@@ -228,6 +228,16 @@ test("Health-Import: nur mit Schlüssel speichern, im Browser auswerten, Ergebni
   assert.deepEqual(st.health.daily.map(d => [d.date, d.metric, d.value]), [["2026-11-19", "rhr", 58]]);
   assert.deepEqual(st.health.last.unknown, ["Gibtsnicht"]);
   assert.equal(st.health.pending, 0);
+  // Meldung der Watch-Automation
+  const mk = await imp(k.key, { training: "Krafttraining<b>" });
+  assert.equal(mk.status, 200);
+  st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal(st.health.marks.length, 1); assert.equal(st.health.marks[0].kind, "Krafttrainingb");
+  assert.equal(st.health.pending, 0);
+  const est = processUpload("", null, { marks: st.health.marks });
+  assert.equal((await post(env, cookie, "/api/health/apply", { batch: null, daily: [], workouts: est.workouts })).status, 200);
+  st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal(st.health.workouts.length, 1);
   await post(env, cookie, "/api/health/revoke", {});
   assert.equal((await imp("Bearer " + k.key, body)).status, 401);
   await post(env, cookie, "/api/health/delete", {});
