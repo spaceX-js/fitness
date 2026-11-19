@@ -12,6 +12,7 @@ export const METRICS = {
   active_kcal:  { label: "Aktive Energie", unit: "kcal", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
   exercise_min: { label: "Trainingsminuten", unit: "Min.", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
   stand_h:      { label: "Stehstunden", unit: "h", dec: 0, agg: "stand", group: "Aktivität", better: "high" },
+  stand_min:    { label: "Stehminuten", unit: "Min.", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
   floors:       { label: "Etagen", unit: "", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
   rhr:          { label: "Ruhepuls", unit: "bpm", dec: 0, agg: "avg", group: "Herz", better: "low" },
   hr_avg:       { label: "Puls Ø", unit: "bpm", dec: 0, agg: "derived", group: "Herz" },
@@ -46,27 +47,28 @@ const NAMES = {
   workout: ["Trainings", "Training", "Workouts", "Workout"],
   hr: ["Herzfrequenz", "Heart Rate", "Puls"],
   steps: ["Schritte", "Steps", "Schrittzahl"],
-  dist: ["Geh- und Laufstrecke", "Gehen + Laufen (Distanz)", "Gehen + Laufen", "Gehen und Laufen", "Distanz (Gehen + Laufen)", "Walking + Running Distance", "Walking Running Distance"],
-  active_kcal: ["Aktive Energie", "Aktiver Energieverbrauch", "Active Energy", "Active Energy Burned"],
+  dist: ["Strecke (Gehen und Laufen)", "Geh- und Laufstrecke", "Gehen + Laufen (Distanz)", "Gehen + Laufen", "Gehen und Laufen", "Distanz (Gehen + Laufen)", "Walking + Running Distance", "Walking Running Distance"],
+  active_kcal: ["Aktivitätsenergie", "Aktive Energie", "Aktiver Energieverbrauch", "Active Energy", "Active Energy Burned"],
   exercise_min: ["Trainingsminuten", "Trainingszeit", "Exercise Minutes", "Apple Exercise Time"],
   stand_h: ["Stehstunden", "Stehen", "Stand Hours", "Stand Hour", "Apple Stand Hour"],
-  floors: ["Erklommene Etagen", "Etagen", "Flights Climbed"],
+  stand_min: ["Stehminuten", "Stand Minutes", "Apple Stand Time", "Stand Time"],
+  floors: ["Treppensteigen", "Erklommene Etagen", "Etagen", "Flights Climbed"],
   rhr: ["Ruhepuls", "Ruheherzfrequenz", "Resting Heart Rate"],
   hrv: ["Herzfrequenzvariabilität", "Herzfrequenz-Variabilität", "HRV", "Heart Rate Variability"],
   vo2: ["Cardiofitness", "Cardio-Fitness", "VO2 max", "VO2max", "VO₂max", "Cardio Fitness"],
-  hr_recovery: ["Herzfrequenz-Erholung", "Herzfrequenzerholung", "Cardio-Erholung", "Cardio Recovery", "Heart Rate Recovery"],
-  walk_hr: ["Gehpuls-Durchschnitt", "Gehpuls", "Durchschnittliche Herzfrequenz beim Gehen", "Walking Heart Rate Average", "Walking Heart Rate"],
+  hr_recovery: ["Cardioerholung", "Herzfrequenz-Erholung", "Herzfrequenzerholung", "Cardio-Erholung", "Cardio Recovery", "Heart Rate Recovery"],
+  walk_hr: ["∅-Herzfrequenz (Gehen)", "Ø-Herzfrequenz (Gehen)", "Herzfrequenz (Gehen)", "Gehpuls-Durchschnitt", "Gehpuls", "Durchschnittliche Herzfrequenz beim Gehen", "Walking Heart Rate Average", "Walking Heart Rate"],
   spo2: ["Blutsauerstoff", "Sauerstoffsättigung", "Blood Oxygen", "Oxygen Saturation"],
   bp_sys: ["Blutdruck (systolisch)", "Systolischer Blutdruck", "Blutdruck systolisch", "Blood Pressure Systolic", "Systolic Blood Pressure"],
   bp_dia: ["Blutdruck (diastolisch)", "Diastolischer Blutdruck", "Blutdruck diastolisch", "Blood Pressure Diastolic", "Diastolic Blood Pressure"],
   sleep: ["Schlaf", "Schlafanalyse", "Sleep", "Sleep Analysis"],
   resp: ["Atemfrequenz", "Respiratory Rate"],
-  wrist_temp: ["Handgelenktemperatur", "Handgelenktemperatur im Schlaf", "Temperatur am Handgelenk im Schlaf", "Wrist Temperature", "Sleeping Wrist Temperature"],
+  wrist_temp: ["Temperatur am Handgelenk", "Handgelenktemperatur", "Handgelenktemperatur im Schlaf", "Temperatur am Handgelenk im Schlaf", "Wrist Temperature", "Sleeping Wrist Temperature"],
   run_speed: ["Laufgeschwindigkeit", "Running Speed"],
   run_power: ["Laufleistung", "Running Power"],
   run_stride: ["Schrittlänge beim Laufen", "Schrittlänge", "Running Stride Length"],
   run_gct: ["Bodenkontaktzeit", "Bodenkontaktzeit beim Laufen", "Running Ground Contact Time"],
-  run_vo: ["Vertikale Bewegung beim Laufen", "Vertikale Bewegung", "Running Vertical Oscillation"],
+  run_vo: ["Vertikale Oszillation", "Vertikale Bewegung beim Laufen", "Vertikale Bewegung", "Running Vertical Oscillation"],
   weight: ["Gewicht", "Körpergewicht", "Weight", "Body Mass"],
   bodyfat: ["Körperfettanteil", "Körperfett", "Body Fat Percentage", "Body Fat"]
 };
@@ -76,10 +78,11 @@ for (const [k, list] of Object.entries(NAMES)) for (const n of list) NAME_MAP.se
 export function typeKey(name) { return NAME_MAP.get(norm(name)) || null; }
 
 // Liste der Typen für die Anleitung (deutsche Namen wie in der Kurzbefehle-App)
-export const SHORTCUT_TYPES = ["Trainings", "Herzfrequenz", "Schritte", "Geh- und Laufstrecke", "Aktive Energie", "Trainingsminuten", "Stehstunden",
-  "Erklommene Etagen", "Ruhepuls", "Herzfrequenzvariabilität", "Cardiofitness", "Herzfrequenz-Erholung", "Gehpuls-Durchschnitt", "Blutsauerstoff",
-  "Blutdruck (systolisch)", "Blutdruck (diastolisch)", "Schlaf", "Atemfrequenz", "Handgelenktemperatur", "Laufgeschwindigkeit", "Laufleistung",
-  "Schrittlänge beim Laufen", "Bodenkontaktzeit", "Vertikale Bewegung beim Laufen", "Gewicht", "Körperfettanteil"];
+// Liste der Typen für den Kurzbefehl – genau so geschrieben wie in der Kurzbefehle-App (iOS, deutsch)
+export const SHORTCUT_TYPES = ["Schritte", "Strecke (Gehen und Laufen)", "Aktivitätsenergie", "Trainingsminuten", "Stehminuten", "Treppensteigen",
+  "Ruheherzfrequenz", "Herzfrequenz", "Herzfrequenzvariabilität", "Cardiofitness", "Cardioerholung", "Blutsauerstoff",
+  "Systolischer Blutdruck", "Diastolischer Blutdruck", "Schlaf", "Atemfrequenz", "Temperatur am Handgelenk",
+  "Laufgeschwindigkeit", "Laufleistung", "Schrittlänge beim Laufen", "Bodenkontaktzeit", "Vertikale Oszillation", "Gewicht", "Körperfettanteil"];
 
 /* ---------- Werte lesen (Kurzbefehle liefern Listen oder Text mit Zeilenumbrüchen) ---------- */
 export function asList(v) {
@@ -242,8 +245,21 @@ export function aggregate(items) {
   const inWin = (key, w) => (samples[key] || []).filter(x => x.s >= w.s - 30000 && x.s <= w.e + 30000);
   const sumBest = (key, w) => { const per = new Map(); for (const x of inWin(key, w)) { const v = num(key, x); if (Number.isFinite(v)) per.set(x.src, (per.get(x.src) || 0) + v); } return per.size ? Math.max(...per.values()) : null; };
   const avgOf = (key, w) => { const v = inWin(key, w).map(x => num(key, x)).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  // Die Kurzbefehle-App liefert keine Trainings. Laufwerte (Geschwindigkeit, Leistung …) misst die Watch aber nur beim Laufen:
+  // daraus Läufe erkennen – Messungen mit weniger als 10 Minuten Abstand gehören zusammen, mindestens 8 Minuten lang.
+  let wlist = samples.workout || [];
+  if (!wlist.length) {
+    const rs = ["run_speed", "run_power", "run_stride", "run_gct", "run_vo"].flatMap(k => samples[k] || []).sort((a, b) => a.s - b.s);
+    let cur = null;
+    for (const x of rs) {
+      if (cur && x.s - cur.e <= 600000) cur.e = Math.max(cur.e, x.e);
+      else { if (cur) wlist.push(cur); cur = { s: x.s, e: x.e, v: "Laufen (erkannt)", src: x.src }; }
+    }
+    if (cur) wlist.push(cur);
+    wlist = wlist.filter(w => w.e - w.s >= 480000);
+  }
   const seen = new Set();
-  for (const w of samples.workout || []) {
+  for (const w of wlist) {
     const id = new Date(Math.round(w.s / 60000) * 60000).toISOString();
     if (seen.has(id)) continue; seen.add(id);
     const label = parseNum(w.v) ? "Training" : String(w.v || "Training").slice(0, 60);

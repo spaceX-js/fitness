@@ -68,3 +68,16 @@ test("Training: Distanz, Puls und Energie aus dem Trainingszeitraum", () => {
   assert.equal(w.run, true); assert.equal(w.min, 45); assert.equal(w.km, 6.8); assert.equal(w.hr_avg, 140); assert.equal(w.hr_max, 150);
   assert.equal(w.date, "2026-11-19");
 });
+
+test("Namen aus der deutschen Kurzbefehle-App und Läufe aus Laufwerten erkennen", () => {
+  for (const [n, k] of [["Ruheherzfrequenz", "rhr"], ["Strecke (Gehen und Laufen)", "dist"], ["Aktivitätsenergie", "active_kcal"], ["Treppensteigen", "floors"],
+    ["Cardioerholung", "hr_recovery"], ["∅-Herzfrequenz (Gehen)", "walk_hr"], ["Temperatur am Handgelenk", "wrist_temp"], ["Vertikale Oszillation", "run_vo"], ["Stehminuten", "stand_min"],
+    ["Systolischer Blutdruck", "bp_sys"], ["Diastolischer Blutdruck", "bp_dia"]]) assert.equal(typeKey(n), k, n);
+  const sp = [], st = [];
+  for (let m = 0; m <= 40; m += 2) { sp.push(9.5); st.push(`2026-11-19T07:${String(m).padStart(2, "0")}:00+01:00`); }
+  const { workouts } = aggregate([{ typ: "Laufgeschwindigkeit", werte: sp, start: st, einheit: "km/h" },
+    { typ: "Herzfrequenz", werte: [135, 139], start: ["2026-11-19T07:10:00+01:00", "2026-11-19T07:30:00+01:00"] },
+    { typ: "Laufgeschwindigkeit", werte: [9], start: ["2026-11-19T12:00:00+01:00"] }]);
+  assert.equal(workouts.length, 1);
+  assert.equal(workouts[0].run, true); assert.equal(workouts[0].min, 40); assert.equal(workouts[0].hr_avg, 137); assert.equal(workouts[0].speed, 9.5);
+});

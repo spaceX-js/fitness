@@ -900,7 +900,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.4.0</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.4.1</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -971,7 +971,7 @@ function viewHealthSetup() {
         ${step(1, "Text", `Diese Liste einfügen: <button class="btn sm alt" id="copyTypes" style="margin-top:6px">Liste kopieren</button>`)}
         ${step(2, "Text teilen", "Trennzeichen: <b>Neue Zeilen</b>.")}
         ${step(3, "Mit jedem Objekt wiederholen", "Eingabe: <b>Geteilter Text</b>. Die folgenden Schritte 4–9 kommen <b>in</b> die Wiederholung.")}
-        ${step(4, "Health-Messungen suchen", "Auf den Typ tippen und <b>Wiederholungsobjekt</b> wählen (Variable). Filter: <b>Startdatum</b> ist in den letzten <b>3 Tagen</b>. Sortieren: Startdatum.")}
+        ${step(4, "Health-Messungen suchen", "Auf den Typ tippen → <b>Variablen …</b> → <b>Wiederholungsobjekt</b>. Filter: <b>Startdatum</b> ist in den letzten <b>3 Tagen</b>. Sortieren: Startdatum.")}
         ${step(5, "Details von Health-Messungen abrufen", "Detail: <b>Wert</b>. Diese Aktion noch dreimal hinzufügen mit <b>Startdatum</b>, <b>Enddatum</b> und <b>Quelle</b> – Eingabe jeweils „Health-Messungen“.")}
         ${step(6, "Wörterbuch", "Fünf Einträge (Typ Text): <b>typ</b> = Wiederholungsobjekt, <b>werte</b> = Wert, <b>start</b> = Startdatum, <b>ende</b> = Enddatum, <b>quelle</b> = Quelle.")}
         ${step(7, "Zu Variable hinzufügen", "Wörterbuch zur Variable <b>daten</b> hinzufügen.")}
