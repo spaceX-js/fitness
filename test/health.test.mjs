@@ -26,7 +26,8 @@ test("Namen, Zahlen und Zeiten in verschiedenen Formen", () => {
 
 test("Tageswerte: Summen ohne Doppelzählung, Durchschnitte, Puls, erster Tag weggelassen", () => {
   const { daily, summary } = aggregate([
-    { typ: "Schritte", werte: [1000, 2000, 500, 2600, 4000, 300], start: ["2026-11-17T10:00:00+01:00", "2026-11-18T09:00:00+01:00", "2026-11-18T12:00:00+01:00", "2026-11-18T09:30:00+01:00", "2026-11-19T08:00:00+01:00", "2026-11-19T09:00:00+01:00"],
+    { typ: "Schritte", werte: [1000, 2000, 500, 2600, 4000, 300], start: ["2026-11-17T10:00:00+01:00", "2026-11-18T09:00:00+01:00", "2026-11-18T12:00:00+01:00", "2026-11-18T08:50:00+01:00", "2026-11-19T08:00:00+01:00", "2026-11-19T09:00:00+01:00"],
+      ende: ["2026-11-17T10:10:00+01:00", "2026-11-18T09:20:00+01:00", "2026-11-18T12:10:00+01:00", "2026-11-18T09:30:00+01:00", "2026-11-19T08:10:00+01:00", "2026-11-19T09:10:00+01:00"],
       quelle: ["iPhone", "iPhone", "iPhone", "Apple Watch", "iPhone", "iPhone"] },
     { typ: "Ruhepuls", werte: "58\n61\n57", start: "18.11.2026, 06:00\n19.11.2026, 06:00\n17.11.2026, 06:00", einheit: "count/min" },
     { typ: "Herzfrequenz", werte: [70, 120, 55, 90], start: ["2026-11-18T10:00:00", "2026-11-18T18:00:00", "2026-11-19T03:00:00", "2026-11-19T10:00:00"] },
@@ -35,7 +36,7 @@ test("Tageswerte: Summen ohne Doppelzählung, Durchschnitte, Puls, erster Tag we
   ]);
   const v = (d, m) => (daily.find(r => r.date === d && r.metric === m) || {}).value;
   assert.equal(v("2026-11-17", "steps"), undefined, "erster Tag ist unvollständig");
-  assert.equal(v("2026-11-18", "steps"), 2600, "Watch und iPhone nicht doppelt: höhere Quelle zählt");
+  assert.equal(v("2026-11-18", "steps"), 3100, "Watch zählt; iPhone nur, wo die Watch nichts gemessen hat");
   assert.equal(v("2026-11-19", "steps"), 4300);
   assert.equal(v("2026-11-18", "rhr"), 58);
   assert.equal(v("2026-11-19", "rhr"), 61);
@@ -62,12 +63,13 @@ test("Training: Distanz, Puls und Energie aus dem Trainingszeitraum", () => {
   const { workouts } = aggregate([
     { typ: "Trainings", werte: ["Laufen"], start: ["2026-11-19T07:00:00+01:00"], ende: ["2026-11-19T07:45:00+01:00"], quelle: ["Apple Watch"] },
     { typ: "Geh- und Laufstrecke", werte: [3000, 3500, 800, 3200, 3600], einheit: "m", quelle: ["Apple Watch", "Apple Watch", "Apple Watch", "iPhone", "iPhone"],
-      start: ["2026-11-19T07:01:00+01:00", "2026-11-19T07:20:00+01:00", "2026-11-19T12:00:00+01:00", "2026-11-19T07:02:00+01:00", "2026-11-19T07:21:00+01:00"] },
+      start: ["2026-11-19T07:01:00+01:00", "2026-11-19T07:20:00+01:00", "2026-11-19T12:00:00+01:00", "2026-11-19T07:02:00+01:00", "2026-11-19T07:21:00+01:00"],
+      ende: ["2026-11-19T07:20:00+01:00", "2026-11-19T07:40:00+01:00", "2026-11-19T12:05:00+01:00", "2026-11-19T07:20:00+01:00", "2026-11-19T07:40:00+01:00"] },
     { typ: "Herzfrequenz", werte: [130, 140, 150, 70], start: ["2026-11-19T07:05:00+01:00", "2026-11-19T07:20:00+01:00", "2026-11-19T07:40:00+01:00", "2026-11-19T09:00:00+01:00"] }
   ]);
   assert.equal(workouts.length, 1);
   const w = workouts[0];
-  assert.equal(w.run, true); assert.equal(w.min, 45); assert.equal(w.km, 6.8); assert.equal(w.hr_avg, 140); assert.equal(w.hr_max, 150);
+  assert.equal(w.run, true); assert.equal(w.min, 45); assert.equal(w.km, 6.5); assert.equal(w.hr_avg, 140); assert.equal(w.hr_max, 150);
   assert.equal(w.date, "2026-11-19");
 });
 

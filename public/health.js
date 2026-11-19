@@ -157,6 +157,20 @@ function convert(key, n, unit) {
   return n;
 }
 
+// Summe ohne Doppelzählung wie in der Health-App: Die Quelle mit den meisten Messungen (meist die Watch) zählt voll,
+// andere Quellen (iPhone) nur für Zeiten, in denen die Hauptquelle nichts gemessen hat.
+function dedupSum(list, val) {
+  const ok = list.map(x => ({ x, v: val(x) })).filter(o => Number.isFinite(o.v));
+  if (!ok.length) return null;
+  const cnt = new Map(); for (const o of ok) cnt.set(o.x.src, (cnt.get(o.x.src) || 0) + 1);
+  const srcs = [...cnt.entries()].sort((a, b) => b[1] - a[1]);
+  const main = (srcs.find(([s]) => /watch/i.test(s)) || srcs[0])[0];
+  const mainIv = ok.filter(o => o.x.src === main).map(o => [o.x.s, Math.max(o.x.e, o.x.s + 60000)]).sort((a, b) => a[0] - b[0]);
+  const covered = (s, e) => mainIv.some(([a, b]) => s < b && (e > a || (e === s && s >= a)));
+  let sum = 0;
+  for (const o of ok) if (o.x.src === main || !covered(o.x.s, Math.max(o.x.e, o.x.s + 60000))) sum += o.v;
+  return sum;
+}
 function union(intervals) {
   const a = intervals.filter(i => i[1] > i[0]).sort((x, y) => x[0] - y[0]);
   let total = 0, cs = -1, ce = -1;
@@ -234,9 +248,8 @@ export function aggregate(items0) {
     if (!def) continue;
     for (const [d, l] of drop(byDay(list))) {
       if (def.agg === "sum") {
-        const per = new Map();
-        for (const x of l) { const v = num(key, x); if (Number.isFinite(v)) per.set(x.src, (per.get(x.src) || 0) + v); }
-        if (per.size) put(d, key, Math.max(...per.values()));
+        const v = dedupSum(l, x => num(key, x));
+        if (v != null) put(d, key, v);
       } else if (def.agg === "stand") {
         const v = l.map(x => parseNum(x.v));
         if (v.every(Boolean)) put(d, key, v.reduce((a, p) => a + p.n, 0));
@@ -264,7 +277,7 @@ export function aggregate(items0) {
   // Trainings: Distanz, Energie, Puls und Laufwerte aus den Messungen im Zeitraum des Trainings
   const workouts = [];
   const inWin = (key, w) => (samples[key] || []).filter(x => x.s >= w.s - 30000 && x.s <= w.e + 30000);
-  const sumBest = (key, w) => { const per = new Map(); for (const x of inWin(key, w)) { const v = num(key, x); if (Number.isFinite(v)) per.set(x.src, (per.get(x.src) || 0) + v); } return per.size ? Math.max(...per.values()) : null; };
+  const sumBest = (key, w) => dedupSum(inWin(key, w), x => num(key, x));
   const avgOf = (key, w) => { const v = inWin(key, w).map(x => num(key, x)).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   // Die Kurzbefehle-App liefert keine Trainings. Laufwerte (Geschwindigkeit, Leistung …) misst die Watch aber nur beim Laufen:
   // daraus Läufe erkennen – Messungen mit weniger als 10 Minuten Abstand gehören zusammen, mindestens 8 Minuten lang.
