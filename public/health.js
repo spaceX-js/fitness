@@ -177,9 +177,28 @@ function sleepStage(v) {
 /* ---------- Auswertung einer Übertragung ---------- */
 // items: [{ typ, werte, start, ende, quelle, einheit }] – Felder als Liste oder Text.
 // Gibt { daily: [{date, metric, value}], workouts: [...], summary: [{typ, key, count, days}] } zurück.
-export function aggregate(items) {
-  const samples = {}, summary = [];
+// Ein Eintrag darf auch viele Typen enthalten (typ als Liste, eine Zeile je Messung) – dann wird er nach Typ aufgeteilt.
+export function splitByType(items) {
+  const out = [];
   for (const it of Array.isArray(items) ? items : []) {
+    if (!it || typeof it !== "object") continue;
+    const typs = asList(it.typ ?? it.type ?? it.Typ);
+    if (typs.length <= 1) { out.push(it); continue; }
+    const f = k => asList(it[k] ?? it[k.charAt(0).toUpperCase() + k.slice(1)]);
+    const W = f("werte"), S = f("start"), E = f("ende"), Q = f("quelle"), U = f("einheit");
+    const groups = new Map();
+    typs.forEach((t, i) => {
+      if (!groups.has(t)) groups.set(t, { typ: t, werte: [], start: [], ende: [], quelle: [], einheit: [] });
+      const g = groups.get(t); g.werte.push(W[i]); g.start.push(S[i]); g.ende.push(E[i] ?? S[i]); g.quelle.push(Q[i] ?? ""); g.einheit.push(U[i] ?? "");
+    });
+    out.push(...groups.values());
+  }
+  return out;
+}
+export function aggregate(items0) {
+  const items = splitByType(items0);
+  const samples = {}, summary = [];
+  for (const it of items) {
     if (!it || typeof it !== "object") continue;
     const typ = String(it.typ ?? it.type ?? it.Typ ?? "").slice(0, 60);
     const key = typeKey(typ);

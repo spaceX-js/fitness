@@ -900,7 +900,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.4.1</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.4.2</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -966,21 +966,17 @@ function viewHealthSetup() {
       <div class="row wrap"><button class="btn sm" id="newKey">${H.hasKey ? "Neuen Schlüssel erzeugen" : "Schlüssel erzeugen"}</button>${H.hasKey ? `<button class="btn sm danger" id="revoke">Schlüssel sperren</button>` : ""}</div></div>
 
     <div class="card"><b>2. Kurzbefehl „${SHORTCUT_NAME}“ bauen</b>
-      <p class="mute small" style="margin:4px 0 6px">In der App <b>Kurzbefehle</b> auf <b>+</b> tippen, Namen „${SHORTCUT_NAME}“ geben, dann diese Aktionen der Reihe nach hinzufügen (über das Suchfeld unten):</p>
+      <p class="mute small" style="margin:4px 0 6px">In der App <b>Kurzbefehle</b> auf <b>+</b> tippen, Namen „${SHORTCUT_NAME}“ geben und diese Aktionen der Reihe nach hinzufügen (Suchfeld unten). Wichtig: Typen immer <b>fest auswählen</b>, nicht als Variable – sonst fragt das iPhone nicht nach dem Zugriff.</p>
       <ol class="guide">
-        ${step(1, "Text", `Diese Liste einfügen: <button class="btn sm alt" id="copyTypes" style="margin-top:6px">Liste kopieren</button>`)}
-        ${step(2, "Text teilen", "Trennzeichen: <b>Neue Zeilen</b>.")}
-        ${step(3, "Mit jedem Objekt wiederholen", "Eingabe: <b>Geteilter Text</b>. Die folgenden Schritte 4–9 kommen <b>in</b> die Wiederholung.")}
-        ${step(4, "Health-Messungen suchen", "Auf den Typ tippen → <b>Variablen …</b> → <b>Wiederholungsobjekt</b>. Filter: <b>Startdatum</b> ist in den letzten <b>3 Tagen</b>. Sortieren: Startdatum.")}
-        ${step(5, "Details von Health-Messungen abrufen", "Detail: <b>Wert</b>. Diese Aktion noch dreimal hinzufügen mit <b>Startdatum</b>, <b>Enddatum</b> und <b>Quelle</b> – Eingabe jeweils „Health-Messungen“.")}
-        ${step(6, "Wörterbuch", "Fünf Einträge (Typ Text): <b>typ</b> = Wiederholungsobjekt, <b>werte</b> = Wert, <b>start</b> = Startdatum, <b>ende</b> = Enddatum, <b>quelle</b> = Quelle.")}
-        ${step(7, "Zu Variable hinzufügen", "Wörterbuch zur Variable <b>daten</b> hinzufügen.")}
-        ${step(8, "(Ende Wiederholen)", "steht automatisch da – die nächste Aktion kommt <b>danach</b>.")}
-        ${step(9, "Inhalte von URL abrufen", `URL: <code class="sel" id="impUrl">${esc(location.origin)}/api/import</code> <button class="btn sm alt" data-copy="impUrl">Kopieren</button><br>
-          Methode: <b>POST</b> · Header: <b>Authorization</b> = <b>Bearer</b> + Leerzeichen + dein Schlüssel<br>
-          Anfragetext: <b>JSON</b> · Feld <b>daten</b>, Typ <b>Array</b>, Wert: Variable <b>daten</b> (falls das nicht geht: Anfragetext <b>Datei</b> mit Variable <b>daten</b>).`)}
+        ${step(1, "Health-Messungen suchen", "Typ: <b>Schritte</b> (aus der Liste wählen). Startdatum ist in den letzten <b>3 Tagen</b>.")}
+        ${step(2, "Zu Variable hinzufügen", "<b>Health-Messungen</b> zur Variable <b>messungen</b> hinzufügen.")}
+        ${step(3, "Für jeden weiteren Typ", `Aktion 1 und 2 zusammen duplizieren (lange drücken → Duplizieren) und nur den Typ ändern. Typen: <span class="small">${SHORTCUT_TYPES.map(esc).join(" · ")}</span>`)}
+        ${step(4, "Details von Health-Messungen abrufen", "Fünfmal hinzufügen, Eingabe jeweils Variable <b>messungen</b>: <b>Typ</b>, <b>Wert</b>, <b>Startdatum</b>, <b>Enddatum</b>, <b>Quelle</b>.")}
+        ${step(5, "Wörterbuch", "Einträge vom Typ Text, Werte als <b>blaue Variablen</b>: <b>typ</b> = Typ, <b>werte</b> = Wert, <b>start</b> = Startdatum, <b>ende</b> = Enddatum, <b>quelle</b> = Quelle.")}
+        ${step(6, "Inhalte von URL abrufen", `URL: <code class="sel" id="impUrl">${esc(location.origin)}/api/import</code> <button class="btn sm alt" data-copy="impUrl">Kopieren</button><br>
+          Methode: <b>POST</b> · Header: <b>Authorization</b> = <b>Bearer</b> + Leerzeichen + dein Schlüssel · Anfragetext: <b>Datei</b> = <b>Wörterbuch</b>.`)}
       </ol>
-      <p class="mute small" style="margin:8px 0 0">Beim ersten Start fragt das iPhone, welche Health-Daten der Kurzbefehl lesen darf: <b>alle erlauben</b>. Danach hier „Jetzt übertragen“ tippen und den Status oben prüfen. Wenn etwas hakt: Screenshot an Claude.</p></div>
+      <p class="mute small" style="margin:8px 0 0">Beim ersten Start fragt das iPhone nach dem Health-Zugriff: <b>alle Schalter einschalten</b>. Danach hier „Jetzt übertragen“ tippen und oben den Status prüfen.</p></div>
 
     <div class="card"><b>3. Automatisch jeden Tag</b>
       <p class="small" style="margin:4px 0 0">Kurzbefehle → <b>Automation</b> → <b>+</b> → <b>Tageszeit</b> (z. B. 21:30, täglich) → <b>Sofort ausführen</b> → Kurzbefehl <b>„${SHORTCUT_NAME}“</b>. Health-Daten sind nur lesbar, wenn das iPhone entsperrt war – eine Zeit wählen, zu der du es meist benutzt.</p>
@@ -989,7 +985,7 @@ function viewHealthSetup() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Gespeichert werden nur Tageswerte und Trainings, keine Einzelmessungen. Alles liegt in deiner eigenen Datenbank.</p>
       <button class="btn sm danger" id="delHealth">Alle Health-Daten löschen</button></div>`;
   const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); toast(msg || "Kopiert"); } catch (e) { toast("Kopieren nicht möglich – bitte markieren und kopieren"); } };
-  $app.querySelector("#copyTypes").addEventListener("click", () => copy(typesText, "Liste kopiert"));
+
   $app.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => copy($app.querySelector("#" + b.dataset.copy).textContent)));
   $app.querySelector("#newKey").addEventListener("click", async () => {
     if (S.health.hasKey && !window.confirm("Neuen Schlüssel erzeugen? Der alte funktioniert dann nicht mehr – im Kurzbefehl muss er ersetzt werden.")) return;

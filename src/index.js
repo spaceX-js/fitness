@@ -7,7 +7,7 @@ import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 import { aggregate } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.4.1";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.4.2";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -261,7 +261,7 @@ async function importHealth(request, env, settings) {
   let body;
   try { const t = await request.text(); if (t.length > 8000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413); body = parseLoose(t); }
   catch (e) { await saveImportLast(env, { at: new Date().toISOString(), ok: false, error: "Konnte die Daten nicht lesen." }); return json({ error: "Konnte die Daten nicht lesen." }, 400); }
-  const items = Array.isArray(body) ? body : body && (body.daten || body.items || body.data);
+  const items = Array.isArray(body) ? body : body && (body.typ || body.werte) ? [body] : body && (body.daten || body.items || body.data);
   const list = (Array.isArray(items) ? items : typeof items === "string" ? [parseLoose(items)].flat() : []).flat().map(x => typeof x === "string" ? parseLoose(x) : x);
   const { daily, workouts, summary } = aggregate(list);
   const now = new Date().toISOString(), ops = [];

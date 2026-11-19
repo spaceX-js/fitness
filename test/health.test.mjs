@@ -81,3 +81,13 @@ test("Namen aus der deutschen Kurzbefehle-App und Läufe aus Laufwerten erkennen
   assert.equal(workouts.length, 1);
   assert.equal(workouts[0].run, true); assert.equal(workouts[0].min, 40); assert.equal(workouts[0].hr_avg, 137); assert.equal(workouts[0].speed, 9.5);
 });
+
+test("Ein Wörterbuch mit allen Messungen (Typ je Zeile, deutsche Datumsangaben)", () => {
+  const { daily } = aggregate([{ typ: "Schritte\nSchritte\nRuheherzfrequenz\nRuheherzfrequenz\nSchritte",
+    werte: "1200\n800\n58\n60\n500", start: "18.11.2026, 09:00\n19.11.2026, 10:00\n18.11.2026, 06:00\n19.11.2026, 06:00\n19.11.2026, 11:00",
+    ende: "18.11.2026, 09:10\n19.11.2026, 10:10\n18.11.2026, 06:00\n19.11.2026, 06:00\n19.11.2026, 11:05", quelle: "iPhone\niPhone\nWatch\nWatch\niPhone" }]);
+  const v = (d, m) => (daily.find(r => r.date === d && r.metric === m) || {}).value;
+  assert.equal(v("2026-11-19", "steps"), 1300);
+  assert.equal(v("2026-11-19", "rhr"), 60);
+  assert.equal(v("2026-11-18", "steps"), undefined, "erster Tag weggelassen");
+});
