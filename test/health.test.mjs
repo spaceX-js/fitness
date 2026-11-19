@@ -12,6 +12,8 @@ test("Namen, Zahlen und Zeiten in verschiedenen Formen", () => {
   assert.deepEqual(parseNum("60,5"), { n: 60.5, unit: "" });
   assert.deepEqual(parseNum("1.234,5 km"), { n: 1234.5, unit: "km" });
   assert.equal(parseNum("abc"), null);
+  assert.equal(parseNum("6.627018749713898e-05").n, 6.627018749713898e-05);
+  assert.equal(parseNum("1.5E+3 m").n, 1500);
   const iso = Date.parse("2026-11-19T06:30:00Z");
   assert.equal(parseTime("2026-11-19T07:30:00+01:00"), iso);
   assert.equal(parseTime("2026-11-19T07:30:00"), iso, "ohne Zeitzone = deutsche Zeit");

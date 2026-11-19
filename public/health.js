@@ -95,6 +95,8 @@ export function asList(v) {
 export function parseNum(v) {
   if (typeof v === "number") return Number.isFinite(v) ? { n: v, unit: "" } : null;
   const s = String(v == null ? "" : v).trim();
+  const sci = s.match(/^(-?\d+(?:\.\d+)?[eE][+-]?\d+)\s*(.*)$/);   // z. B. 6.627e-05 (kleine Strecken)
+  if (sci) { const n = Number(sci[1]); return Number.isFinite(n) ? { n, unit: sci[2].trim() } : null; }
   const m = s.match(/^(-?[\d.,]+)\s*(.*)$/);
   if (!m) return null;
   let t = m[1];
