@@ -214,8 +214,8 @@ test("Health-Import: nur mit Schlüssel, Daten landen als Tageswerte, Schlüssel
   assert.equal((await imp("fit_" + "0".repeat(48), body)).status, 401);
   const k = await (await post(env, cookie, "/api/health/key", {})).json();
   assert.match(k.key, /^fit_[a-f0-9]{48}$/);
-  const r = await imp(k.key, body);
-  assert.equal(r.status, 200);
+  const r = await call(env, "/api/import", { method: "POST", headers: { Authorization: k.key, "Content-Type": "application/json", "CF-Connecting-IP": "10.9.9.8" }, body: JSON.stringify(body) });
+  assert.equal(r.status, 200, "Schlüssel auch ohne „Bearer“");
   const st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
   assert.deepEqual(st.health.daily.map(d => [d.date, d.metric, d.value]), [["2026-11-19", "rhr", 58]]);
   assert.deepEqual(st.health.last.unknown, ["Gibtsnicht"]);

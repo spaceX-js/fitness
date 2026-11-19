@@ -7,7 +7,7 @@ import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 import { aggregate } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.4.2";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.4.3";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -256,7 +256,7 @@ export function cleanJson(v, depth) {
 async function importHealth(request, env, settings) {
   const ip = "import:" + ipOf(request);   // eigener Zähler – ein falsch eingerichteter Kurzbefehl sperrt nicht die Anmeldung
   if (await tooManyFails(env, ip)) return json({ error: "Zu viele Versuche." }, 429);
-  const m = (request.headers.get("Authorization") || "").match(/^Bearer\s+(fit_[a-f0-9]{48})$/);
+  const m = (request.headers.get("Authorization") || "").trim().match(/^(?:Bearer\s+)?(fit_[a-f0-9]{48})$/i);   // „Bearer“ davor ist optional
   if (!m || !settings.import_hash || !safeEqual(await sha256(m[1]), settings.import_hash)) { await fail(env, ip); return json({ error: "Schlüssel ungültig." }, 401); }
   let body;
   try { const t = await request.text(); if (t.length > 8000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413); body = parseLoose(t); }
