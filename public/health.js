@@ -107,10 +107,18 @@ export function parseNum(v) {
 }
 
 // Zeitpunkt → Millisekunden. ISO (mit/ohne Zeitzone), „19.11.2026, 08:31(:05)“, „19.11.26 um 8:31“, englische Formate.
+// Zeitzonen-Versatz (Minuten) – je Stunde zwischengespeichert, weil Intl sonst bei vielen Messungen sehr langsam ist
+let TZF = null;
+const OFF = new Map();
 function tzOffsetMin(ms) {
-  const p = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms));
-  const g = t => Number(p.find(x => x.type === t).value);
-  return (Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second")) - Math.floor(ms / 1000) * 1000) / 60000;
+  const hk = Math.floor(ms / 3600000);
+  let o = OFF.get(hk);
+  if (o !== undefined) return o;
+  TZF = TZF || new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const t = hk * 3600000, p = TZF.formatToParts(new Date(t)), g = k => Number(p.find(x => x.type === k).value);
+  o = (Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second")) - t) / 60000;
+  OFF.set(hk, o);
+  return o;
 }
 function localToMs(y, mo, d, h, mi, s) {
   const guess = Date.UTC(y, mo - 1, d, h, mi, s);
@@ -118,10 +126,18 @@ function localToMs(y, mo, d, h, mi, s) {
   ms = guess - tzOffsetMin(ms) * 60000;
   return ms;
 }
+const PT = new Map();
 export function parseTime(v) {
   if (v == null || v === "") return NaN;
   if (typeof v === "number") return v > 1e12 ? v : v * 1000;
   const s = String(v).trim();
+  const c = PT.get(s); if (c !== undefined) return c;
+  const r = parseTime0(s);
+  if (PT.size > 200000) PT.clear();
+  PT.set(s, r);
+  return r;
+}
+function parseTime0(s) {
   let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?$/);
   if (m) {
     if (m[7]) return Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, "0")}:${m[5]}:${m[6] || "00"}${m[7].length === 5 ? m[7].slice(0, 3) + ":" + m[7].slice(3) : m[7]}`);
@@ -138,7 +154,7 @@ export function parseTime(v) {
   return p;
 }
 export function localDate(ms) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+  return new Date(ms + tzOffsetMin(ms) * 60000).toISOString().slice(0, 10);
 }
 
 // Einheiten angleichen
@@ -166,7 +182,12 @@ function dedupSum(list, val) {
   const srcs = [...cnt.entries()].sort((a, b) => b[1] - a[1]);
   const main = (srcs.find(([s]) => /watch/i.test(s)) || srcs[0])[0];
   const mainIv = ok.filter(o => o.x.src === main).map(o => [o.x.s, Math.max(o.x.e, o.x.s + 60000)]).sort((a, b) => a[0] - b[0]);
-  const covered = (s, e) => mainIv.some(([a, b]) => s < b && (e > a || (e === s && s >= a)));
+  const maxEnd = []; let m = -Infinity; for (const iv of mainIv) { m = Math.max(m, iv[1]); maxEnd.push(m); }
+  const covered = (s, e) => {   // gibt es ein Intervall der Hauptquelle, das [s, e] überlappt?
+    let lo = 0, hi = mainIv.length - 1, idx = -1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (mainIv[mid][0] < e) { idx = mid; lo = mid + 1; } else hi = mid - 1; }
+    return idx >= 0 && maxEnd[idx] > s;
+  };
   let sum = 0;
   for (const o of ok) if (o.x.src === main || !covered(o.x.s, Math.max(o.x.e, o.x.s + 60000))) sum += o.v;
   return sum;
@@ -319,4 +340,36 @@ export function fmtVal(key, v) {
 export function avgRange(daily, metric, from, to) {
   const v = daily.filter(r => r.metric === metric && r.date >= from && r.date <= to).map(r => r.value);
   return v.length ? { v: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
+}
+
+/* ---------- Übertragung lesen (im Browser) ---------- */
+function parseLoose(t) {
+  if (typeof t !== "string") return t;
+  const s = t.trim(); if (!s) return null;
+  try { return JSON.parse(s); } catch (e) {}
+  try { return JSON.parse("[" + s.replace(/}\s*[\r\n,]+\s*{/g, "},{") + "]"); } catch (e) {}
+  return s;
+}
+export function itemsFromText(text) {
+  const body = parseLoose(text);
+  const items = Array.isArray(body) ? body : body && (body.typ || body.werte) ? [body] : body && (body.daten || body.items || body.data);
+  return (Array.isArray(items) ? items : typeof items === "string" ? [parseLoose(items)].flat() : []).flat().map(x => typeof x === "string" ? parseLoose(x) : x).filter(x => x && typeof x === "object");
+}
+// Kleine Stichprobe je Typ für die Fehlersuche (Einheiten, Quellen) – keine vollständigen Daten
+export function probeOf(list) {
+  try {
+    return splitByType(list).slice(0, 30).map(it => {
+      const v = asList(it.werte), q = asList(it.quelle), s = asList(it.start), u = asList(it.einheit);
+      const src = {}; q.forEach(x => { const k = String(x).slice(0, 40); src[k] = (src[k] || 0) + 1; });
+      return { typ: String(it.typ).slice(0, 50), n: v.length, werte: v.slice(0, 3).map(x => String(x).slice(0, 30)), start: s.slice(0, 1).map(String), einheit: u.slice(0, 1).map(String), quellen: src };
+    });
+  } catch (e) { return []; }
+}
+// Ganze Auswertung einer Übertragung: Ergebnis für /api/health/apply
+export function processUpload(text, receivedAt) {
+  const list = itemsFromText(text);
+  const { daily, workouts, summary } = aggregate(list);
+  return { daily, workouts, summary: { received: receivedAt || null, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
+    unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
+    sample: list.length ? "" : String(text || "").slice(0, 300), probe: probeOf(list) } };
 }

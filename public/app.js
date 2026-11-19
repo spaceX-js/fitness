@@ -1,7 +1,7 @@
 // Fitness – Oberfläche. Läuft nur nach Anmeldung; Daten kommen von /api (Cloudflare Worker + D1).
 import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, sourceDay, swapDays, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
 import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK, readiness } from "./coach.js";
-import { METRICS, GROUPS as HGROUPS, SHORTCUT_TYPES, fmtVal, avgRange } from "./health.js";
+import { METRICS, GROUPS as HGROUPS, SHORTCUT_TYPES, fmtVal, avgRange, processUpload } from "./health.js";
 import { mount, still } from "./anim.js";
 
 const $app = document.getElementById("app"), $rest = document.getElementById("rest");
@@ -21,7 +21,23 @@ async function api(path, body) {
   if (!res.ok) throw new Error(j.error || "Fehler " + res.status);
   return j;
 }
-async function load() { S = await api("/api/state"); loadedAt = Date.now(); }
+async function load() { S = await api("/api/state"); loadedAt = Date.now(); if (S.health && S.health.pending) await processHealthUploads(); }
+// Übertragungen vom Kurzbefehl hier im Browser auswerten (der kostenlose Server hat dafür zu wenig Rechenzeit)
+let processing = false;
+async function processHealthUploads() {
+  if (processing) return; processing = true;
+  try {
+    for (let i = 0; i < 20; i++) {
+      const r = await api("/api/health/raw");
+      if (!r.batch) break;
+      const out = processUpload(r.data, r.receivedAt);
+      const res = await api("/api/health/apply", { batch: r.batch, ...out });
+      if (!res.left) break;
+    }
+    S = await api("/api/state");
+  } catch (e) { console.warn("Health-Auswertung:", e.message); }
+  processing = false;
+}
 async function saveSettings(patch) {
   Object.assign(S, patch);
   await api("/api/settings", patch);
@@ -900,7 +916,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.4.7</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.5.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -954,7 +970,7 @@ function viewHealthSetup() {
   const step = (n, t, body) => `<li><b>${t}</b><div class="small" style="margin-top:4px">${body}</div></li>`;
   $app.innerHTML = `<div class="top"><a class="back" href="#/mehr" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">Ich</div><h1 style="font-size:24px">Apple Health</h1></div></div>
     <div class="card"><b>Status</b>
-      ${last.at ? `<p class="small" style="margin:6px 0 0">Letzte Übertragung: <b>${esc(fmtWhen(last.at))}</b>${last.ok ? ` · ${last.days} Tageswerte · ${last.workouts} Trainings` : ` · <span style="color:var(--stop)">${esc(last.error || "Fehler")}</span>`}</p>` : `<p class="mute small" style="margin:6px 0 0">Noch keine Übertragung.</p>`}
+      ${last.at ? `<p class="small" style="margin:6px 0 0">Letzte Übertragung: <b>${esc(fmtWhen(last.received || last.at))}</b>${last.ok ? ` · ${last.days} Tageswerte · ${last.workouts} Trainings` : ` · <span style="color:var(--stop)">${esc(last.error || "Fehler")}</span>`}</p>` : `<p class="mute small" style="margin:6px 0 0">Noch keine Übertragung.</p>`}
       ${last.unknown && last.unknown.length ? `<p class="small" style="color:var(--warn);margin:6px 0 0">Nicht erkannt: ${esc(last.unknown.join(", "))}</p>` : ""}
       ${last.empty && last.empty.length ? `<p class="mute small" style="margin:6px 0 0">Ohne Werte (in den letzten Tagen nichts gemessen oder kein Zugriff): ${esc(last.empty.join(", "))}</p>` : ""}
       ${last.items && last.items.length ? `<details style="margin-top:8px"><summary class="small">Details der letzten Übertragung</summary><div class="list">${last.items.map(i => `<div class="it small"><span class="grow">${esc(i.typ)}</span><span class="mute">${i.key ? i.count + " Werte" : "unbekannt"}</span></div>`).join("")}</div></details>` : ""}

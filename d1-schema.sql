@@ -60,3 +60,14 @@ CREATE TABLE IF NOT EXISTS workouts (
   min REAL, km REAL, kcal REAL, hr_avg REAL, hr_max REAL, speed REAL, power REAL, stride REAL, gct REAL, source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS workouts_date ON workouts(date);
+
+-- Apple Health: rohe Übertragungen vom Kurzbefehl, bis die App sie im Browser ausgewertet hat (danach gelöscht)
+CREATE TABLE IF NOT EXISTS health_raw (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch       TEXT NOT NULL,
+  part        INTEGER NOT NULL,
+  parts       INTEGER NOT NULL,
+  received_at TEXT NOT NULL,
+  data        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS health_raw_batch ON health_raw(batch, part);

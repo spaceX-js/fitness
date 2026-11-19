@@ -206,23 +206,30 @@ test("Planer speichert Angaben", async () => {
   assert.deepEqual(st.planner.answers.goals, ["Muskelaufbau"]);
 });
 
-test("Health-Import: nur mit Schlüssel, Daten landen als Tageswerte, Schlüssel sperrbar", async () => {
+test("Health-Import: nur mit Schlüssel speichern, im Browser auswerten, Ergebnis übernehmen, Schlüssel sperrbar", async () => {
   const { env, cookie } = await setupDone();
-  for (const t of ["CREATE TABLE IF NOT EXISTS health_daily (date TEXT NOT NULL, metric TEXT NOT NULL, value REAL NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (date, metric))"]) env.DB.raw.exec(t);
-  const imp = (key, body) => call(env, "/api/import", { method: "POST", headers: { Authorization: "Bearer " + key, "Content-Type": "application/json", "CF-Connecting-IP": "10.9.9.9" }, body: JSON.stringify(body) });
-  const body = { daten: [{ typ: "Ruhepuls", werte: "60\n58", start: "18.11.2026, 06:00\n19.11.2026, 06:00" }, { typ: "Gibtsnicht", werte: [1], start: ["2026-11-19T07:00:00"] }] };
-  assert.equal((await imp("fit_" + "0".repeat(48), body)).status, 401);
+  const { processUpload } = await import("../public/health.js");
+  const imp = (key, body) => call(env, "/api/import", { method: "POST", headers: { Authorization: key, "Content-Type": "application/json", "CF-Connecting-IP": "10.9.9.9" }, body: JSON.stringify(body) });
+  const body = { typ: "Resting Heart Rate\nResting Heart Rate\nGibtsnicht", werte: "60\n58\n1", start: "18.11.2026, 06:00\n19.11.2026, 06:00\n19.11.2026, 07:00" };
+  assert.equal((await imp("Bearer fit_" + "0".repeat(48), body)).status, 401);
   const k = await (await post(env, cookie, "/api/health/key", {})).json();
   assert.match(k.key, /^fit_[a-f0-9]{48}$/);
-  const r = await call(env, "/api/import", { method: "POST", headers: { Authorization: k.key, "Content-Type": "application/json", "CF-Connecting-IP": "10.9.9.8" }, body: JSON.stringify(body) });
-  assert.equal(r.status, 200, "Schlüssel auch ohne „Bearer“");
-  const st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal((await imp(k.key, body)).status, 200, "Schlüssel auch ohne „Bearer“");
+  let st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal(st.health.pending, 1);
+  // Der Import-Schlüssel kann nichts lesen
+  assert.equal((await call(env, "/api/health/raw", { headers: { Authorization: "Bearer " + k.key } })).status, 401);
+  const raw = await (await call(env, "/api/health/raw", { headers: { Cookie: cookie } })).json();
+  const out = processUpload(raw.data, raw.receivedAt);
+  out.daily.push({ date: "2026-11-19", metric: "<script>", value: 1 });
+  const ap = await (await post(env, cookie, "/api/health/apply", { batch: raw.batch, ...out })).json();
+  assert.equal(ap.left, 0);
+  st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
   assert.deepEqual(st.health.daily.map(d => [d.date, d.metric, d.value]), [["2026-11-19", "rhr", 58]]);
   assert.deepEqual(st.health.last.unknown, ["Gibtsnicht"]);
-  // Der Import-Schlüssel kann nichts lesen
-  assert.equal((await call(env, "/api/state", { headers: { Authorization: "Bearer " + k.key } })).status, 401);
+  assert.equal(st.health.pending, 0);
   await post(env, cookie, "/api/health/revoke", {});
-  assert.equal((await imp(k.key, body)).status, 401);
+  assert.equal((await imp("Bearer " + k.key, body)).status, 401);
   await post(env, cookie, "/api/health/delete", {});
   assert.equal((await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json()).health.daily.length, 0);
 });

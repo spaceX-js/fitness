@@ -4,10 +4,10 @@
 // strenge Content-Security-Policy, Sperre nach Fehlversuchen. Ohne Anmeldung ist außer Login, Icon und CSS nichts erreichbar.
 import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, randomCode, safeEqual } from "./auth.js";
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
-import { aggregate, splitByType, asList } from "../public/health.js";
+import { METRICS } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.4.7";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.5.0";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -183,6 +183,33 @@ async function api(request, env, settings, url, session) {
     const days = Math.min(730, Math.max(7, Number(url.searchParams.get("days")) || 120));
     return json(await healthData(env, settings, days));
   }
+  if (path === "/api/health/raw" && method === "GET") {        // älteste noch nicht ausgewertete Übertragung
+    const first = await env.DB.prepare("SELECT batch, received_at FROM health_raw ORDER BY id LIMIT 1").first();
+    if (!first) return json({ batch: null });
+    const { results } = await env.DB.prepare("SELECT data FROM health_raw WHERE batch = ? ORDER BY part").bind(first.batch).all();
+    const left = (await env.DB.prepare("SELECT COUNT(DISTINCT batch) AS n FROM health_raw").first()).n;
+    return json({ batch: first.batch, receivedAt: first.received_at, data: results.map(r => r.data).join(""), left });
+  }
+  if (path === "/api/health/apply" && method === "POST") {      // Ergebnis der Auswertung aus dem Browser speichern
+    const b = await readJson(request, 2000000);
+    if (!b || typeof b.batch !== "string" || !/^[a-f0-9]{16}$/.test(b.batch)) return json({ error: "Ungültige Anfrage." }, 400);
+    const daily = Array.isArray(b.daily) ? b.daily.slice(0, 5000) : [], wos = Array.isArray(b.workouts) ? b.workouts.slice(0, 500) : [];
+    const now = new Date().toISOString(), ops = [], f = v => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    for (const r of daily) if (r && isDate(r.date) && METRICS[r.metric] && Number.isFinite(r.value))
+      ops.push(env.DB.prepare("INSERT INTO health_daily (date, metric, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(date, metric) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(r.date, r.metric, r.value, now));
+    for (const x of wos) if (x && typeof x.id === "string" && x.id.length < 40 && isDate(x.date))
+      ops.push(env.DB.prepare(`INSERT INTO workouts (id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET end = excluded.end, kind = excluded.kind, run = excluded.run, min = excluded.min,
+        km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
+        speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)
+        .bind(x.id, x.date, String(x.start || "").slice(0, 30), String(x.end || "").slice(0, 30), String(x.kind || "Training").slice(0, 60), x.run ? 1 : 0, f(x.min), f(x.km), f(x.kcal), f(x.hr_avg), f(x.hr_max), f(x.speed), f(x.power), f(x.stride), f(x.gct), String(x.source || "").slice(0, 60), now));
+    ops.push(env.DB.prepare("DELETE FROM health_raw WHERE batch = ?").bind(b.batch));
+    for (let k = 0; k < ops.length; k += 80) await env.DB.batch(ops.slice(k, k + 80));
+    const s = cleanJson(b.summary || {}, 0) || {};
+    const left = (await env.DB.prepare("SELECT COUNT(*) AS n FROM health_raw").first()).n;
+    await saveImportLast(env, { ...s, at: now, ok: true, pending: left > 0 });
+    return json({ ok: true, left });
+  }
   if (path === "/api/health/key" && method === "POST") {      // neuen Import-Schlüssel erzeugen (wird nur einmal angezeigt)
     const key = "fit_" + randomHex(24);
     await env.DB.batch([setSetting(env, "import_hash", await sha256(key)), setSetting(env, "import_created", new Date().toISOString())]);
@@ -193,7 +220,7 @@ async function api(request, env, settings, url, session) {
     return json({ ok: true });
   }
   if (path === "/api/health/delete" && method === "POST") {
-    await env.DB.batch([env.DB.prepare("DELETE FROM health_daily"), env.DB.prepare("DELETE FROM workouts"), env.DB.prepare("DELETE FROM settings WHERE key = 'import_last'")]);
+    await env.DB.batch([env.DB.prepare("DELETE FROM health_daily"), env.DB.prepare("DELETE FROM workouts"), env.DB.prepare("DELETE FROM health_raw"), env.DB.prepare("DELETE FROM settings WHERE key = 'import_last'")]);
     return json({ ok: true });
   }
 
@@ -258,35 +285,17 @@ async function importHealth(request, env, settings) {
   if (await tooManyFails(env, ip)) return json({ error: "Zu viele Versuche." }, 429);
   const m = (request.headers.get("Authorization") || "").trim().match(/^(?:Bearer\s+)?(fit_[a-f0-9]{48})$/i);   // „Bearer“ davor ist optional
   if (!m || !settings.import_hash || !safeEqual(await sha256(m[1]), settings.import_hash)) { await fail(env, ip); return json({ error: "Schlüssel ungültig." }, 401); }
-  let body;
-  try { const t = await request.text(); if (t.length > 8000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413); body = parseLoose(t); }
-  catch (e) { await saveImportLast(env, { at: new Date().toISOString(), ok: false, error: "Konnte die Daten nicht lesen." }); return json({ error: "Konnte die Daten nicht lesen." }, 400); }
-  const items = Array.isArray(body) ? body : body && (body.typ || body.werte) ? [body] : body && (body.daten || body.items || body.data);
-  const list = (Array.isArray(items) ? items : typeof items === "string" ? [parseLoose(items)].flat() : []).flat().map(x => typeof x === "string" ? parseLoose(x) : x);
-  const { daily, workouts, summary } = aggregate(list);
-  const now = new Date().toISOString(), ops = [];
-  for (const r of daily) ops.push(env.DB.prepare("INSERT INTO health_daily (date, metric, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(date, metric) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(r.date, r.metric, r.value, now));
-  for (const x of workouts) ops.push(env.DB.prepare(`INSERT INTO workouts (id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET end = excluded.end, kind = excluded.kind, run = excluded.run, min = excluded.min,
-    km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
-    speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)
-    .bind(x.id, x.date, x.start, x.end, x.kind, x.run ? 1 : 0, x.min, x.km, x.kcal, x.hr_avg, x.hr_max, x.speed, x.power, x.stride, x.gct, x.source, now));
-  for (let i = 0; i < ops.length; i += 80) await env.DB.batch(ops.slice(i, i + 80));
-  const last = { at: now, ok: true, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
-    unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
-    sample: summary.length ? "" : String(JSON.stringify(body) || "").slice(0, 600), probe: probeOf(list) };
-  await saveImportLast(env, last);
-  return json({ ok: true, tage: daily.length, trainings: workouts.length, unbekannt: last.unknown });
-}
-// Kleine Stichprobe je Typ für die Fehlersuche (Einheiten, Quellen) – keine vollständigen Daten
-function probeOf(list) {
-  try {
-    return splitByType(list).slice(0, 30).map(it => {
-      const v = asList(it.werte), q = asList(it.quelle), s = asList(it.start), e = asList(it.ende), u = asList(it.einheit);
-      const src = {}; q.forEach((x, i) => { const k = String(x).slice(0, 40); src[k] = (src[k] || 0) + 1; });
-      return { typ: String(it.typ).slice(0, 50), n: v.length, werte: v.slice(0, 4).map(x => String(x).slice(0, 30)), start: s.slice(0, 2).map(String), ende: e.slice(0, 2).map(String), einheit: u.slice(0, 1).map(String), quellen: src };
-    });
-  } catch (e) { return []; }
+  // Nur speichern, nicht auswerten: Die Auswertung vieler Messungen braucht mehr Rechenzeit, als der kostenlose Tarif pro Anfrage erlaubt.
+  // Ausgewertet wird beim nächsten Öffnen der App im Browser; dort werden nur die Ergebnisse zurückgeschickt.
+  const t = await request.text();
+  if (!t.trim()) return json({ error: "Keine Daten." }, 400);
+  if (t.length > 12000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413);
+  const batch = randomHex(8), now = new Date().toISOString(), CH = 400000, parts = Math.ceil(t.length / CH), ops = [];
+  for (let p = 0; p < parts; p++) ops.push(env.DB.prepare("INSERT INTO health_raw (batch, part, parts, received_at, data) VALUES (?, ?, ?, ?, ?)").bind(batch, p, parts, now, t.slice(p * CH, (p + 1) * CH)));
+  for (let k = 0; k < ops.length; k += 10) await env.DB.batch(ops.slice(k, k + 10));
+  const prev = parseObj(settings.import_last);
+  await saveImportLast(env, { ...prev, received: now, bytes: t.length, pending: true });
+  return json({ ok: true, gespeichert: true, hinweis: "Wird beim nächsten Öffnen der Fitness-App ausgewertet." });
 }
 // JSON lesen; Kurzbefehle schicken manchmal Text statt Listen – dann trotzdem versuchen
 function parseLoose(t) {
@@ -301,7 +310,8 @@ async function healthData(env, settings, days) {
   const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const daily = (await env.DB.prepare("SELECT date, metric, value FROM health_daily WHERE date >= ? ORDER BY date").bind(since).all()).results;
   const workouts = (await env.DB.prepare("SELECT id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source FROM workouts WHERE date >= ? ORDER BY start DESC").bind(since).all()).results;
-  return { daily, workouts, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
+  const pending = (await env.DB.prepare("SELECT COUNT(DISTINCT batch) AS n FROM health_raw").first()).n;
+  return { daily, workouts, pending, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
 }
 
 /* ---------- Pläne ---------- */
