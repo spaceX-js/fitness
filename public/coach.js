@@ -1,12 +1,28 @@
 // Coach: Empfehlungen zur Anpassung des Plans – nach Leistung, Gefühl, Krankheit und Einschränkungen.
 // Reine Regeln, keine KI und kein Fremddienst. Jede Empfehlung erklärt ihren Grund und wird nur auf Knopfdruck übernommen.
 import { EXERCISES, REGIONS, sessionFor, weekOf, dayIndex, planOf, slotOf, sourceDay } from "./plan.js";
+import { avgRange, fmtVal } from "./health.js";
 
 export const SICK = {
   head: { label: "Erkältet (nur Kopf)", text: "Schnupfen, Halskratzen – nur oberhalb des Halses" },
   body: { label: "Krank (Körper / Fieber)", text: "Fieber, Gliederschmerzen, Husten, Magen-Darm" }
 };
 export const FEEL = ["", "Zu leicht", "Leicht", "Passend", "Schwer", "Zu schwer"];
+
+// Erholung aus Apple-Health-Daten: Ruhepuls, HRV und Schlaf im Vergleich zu deinem Normalwert (letzte 4 Wochen)
+export function readiness(health, today) {
+  const d = (health && health.daily) || [];
+  const recent = (m, days) => avgRange(d, m, addDays(today, -days + 1), today);
+  const base = m => avgRange(d, m, addDays(today, -30), addDays(today, -3));
+  const out = { flags: [], values: {} };
+  const rhr = recent("rhr", 2), rhrB = base("rhr"), hrv = recent("hrv", 2), hrvB = base("hrv");
+  const sleep = (d.find(r => r.metric === "sleep_total" && r.date === today) || {}).value;
+  if (rhr) out.values.rhr = rhr.v; if (hrv) out.values.hrv = hrv.v; if (sleep != null) out.values.sleep = sleep;
+  if (rhr && rhrB && rhrB.n >= 7 && rhr.v >= rhrB.v + 6) out.flags.push("Ruhepuls " + fmtVal("rhr", rhr.v) + " (sonst " + fmtVal("rhr", rhrB.v) + ")");
+  if (hrv && hrvB && hrvB.n >= 7 && hrv.v <= hrvB.v * 0.8) out.flags.push("HRV " + fmtVal("hrv", hrv.v) + " (sonst " + fmtVal("hrv", hrvB.v) + ")");
+  if (sleep != null && sleep < 6) out.flags.push("nur " + fmtVal("sleep_total", sleep) + " Schlaf");
+  return out;
+}
 
 export function addDays(iso, n) { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 export function daysBetween(a, b) { return Math.round((Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z")) / 86400000); }
@@ -136,6 +152,15 @@ export function suggestions(state, today) {
   if (z2.length === 2 && z2.every(l => Number(l.data.hr) > 141))
     add({ key: "z2fast-" + z2[1].date, level: "info", title: "Zone-2-Läufe zu schnell",
       text: "Die letzten beiden lockeren Läufe lagen bei Ø " + z2.map(l => l.data.hr).join(" und ") + " bpm (Ziel 130–140). Langsamer laufen – Gehpausen sind völlig in Ordnung. Genau so wächst die Grundlage.", actions: [] });
+
+  // 5b) Erholung (Apple Health)
+  const rd = readiness(state.health, today);
+  if (rd.flags.length) {
+    const t = sessionFor(today, state);
+    const hard = (t.kind === "run" && t.zone >= 3) || t.kind === "strength";
+    if (rd.flags.length >= 2 || hard) add({ key: "ready-" + today, level: rd.flags.length >= 2 ? "warn" : "info", title: rd.flags.length >= 2 ? "Erholung heute niedrig" : "Erholung etwas niedriger",
+      text: "Laut Apple Health: " + rd.flags.join(", ") + ". " + (hard ? "Heute lieber leichter: weniger Sätze oder Gewicht, Intervalle als lockeren Lauf – oder den Tag mit einem Erholungstag tauschen." : "Achte heute auf lockeres Tempo und genug Schlaf."), actions: [] });
+  }
 
   // 6) Verpasste Einheiten → Woche wiederholen
   const week = weekOf(state.start, today);

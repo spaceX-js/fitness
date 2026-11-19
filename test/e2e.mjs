@@ -79,7 +79,9 @@ if (!(await page.textContent(".hero .k")).startsWith("Heute")) fail("Zurück zu 
 await page.click(`[data-day='${dayOf(2)}']`); await page.click("#swapDay"); await page.waitForTimeout(200);
 await shot("04d-tauschen");
 await page.click(`[data-to='${dayOf(1)}']`); await page.waitForTimeout(500);
-if (!(await page.textContent(".hero")).includes("Lauf")) fail("Tausch nicht angekommen (heute sollte jetzt Laufen sein)");
+await page.click(`[data-day='${dayOf(1)}']`); await page.waitForTimeout(200);
+if (!(await page.textContent(".hero")).includes("Fitnessstudio")) fail("Tausch nicht angekommen (Dienstag sollte jetzt Fitnessstudio sein)");
+await page.click("#toToday").catch(() => {}); await page.waitForTimeout(200);
 await shot("04e-getauscht");
 if (await page.evaluate(() => document.documentElement.scrollWidth) > 390) fail("Startseite breiter als der iPhone-Bildschirm");
 const versions = await page.evaluate(() => fetch("/api/state").then(r => r.json()).then(j => j.plans.length));
@@ -112,6 +114,44 @@ await page.click("[data-lim='schulter']"); await page.waitForTimeout(600);
 await page.goto(base + "/#/heute"); await page.waitForSelector(".hero");
 await shot("11-heute-einschraenkung", true);
 if (!(await page.textContent("body")).includes("Einschränkung Schulter")) fail("Ersatz-Vorschlag bei Einschränkung fehlt");
+
+// v0.4: Apple Health – Schlüssel erzeugen, Kurzbefehl-Übertragung nachstellen, anzeigen
+await page.goto(base + "/#/mehr/health"); await page.waitForSelector("#newKey");
+await page.click("#newKey"); await page.waitForSelector("#theKey");
+const hkey = (await page.textContent("#theKey")).trim();
+await shot("21-health-einrichtung", true);
+{
+  const days = [], iso = (d, h, m = 0) => { const x = new Date(d + "T00:00:00"); x.setHours(h, m); return x.toISOString(); };
+  for (let i = 30; i >= 0; i--) { const d = new Date(Date.now() - i * 86400000); days.push(d.toISOString().slice(0, 10)); }
+  const L = (typ, fn) => { const w = [], s = [], e = [], q = []; days.forEach((d, i) => fn(d, i).forEach(([v, st, en, src]) => { w.push(v); s.push(st); e.push(en || st); q.push(src || "Apple Watch"); })); return { typ, werte: w, start: s, ende: e, quelle: q }; };
+  const t = days[days.length - 1];
+  const items = [
+    L("Ruhepuls", (d, i) => [[i > 28 ? 64 : 57 + (i % 3), iso(d, 6)]]),
+    L("Herzfrequenzvariabilität", (d, i) => [[i > 28 ? 34 : 45 + (i % 5), iso(d, 6)]]),
+    L("Cardiofitness", (d, i) => i % 5 ? [] : [[(48.4 + i * 0.03).toFixed(1), iso(d, 18)]]),
+    L("Schritte", (d, i) => [[6000 + (i * 397) % 5000, iso(d, 12)]]),
+    L("Aktive Energie", (d, i) => [[400 + (i * 37) % 300, iso(d, 12)]]),
+    L("Gewicht", (d, i) => i % 3 ? [] : [[(73.4 - i * 0.02).toFixed(1).replace(".", ","), iso(d, 7)]]),
+    L("Schlaf", (d, i) => { const p = i ? days[i - 1] : d; if (!i) return []; return [["Kern", iso(p, 23), iso(d, 2)], ["Tief", iso(d, 2), iso(d, 3)], ["REM", iso(d, 3), iso(d, i > 28 ? 4 : 6, 30)]]; }),
+    { typ: "Trainings", werte: ["Laufen"], start: [iso(t, 7)], ende: [iso(t, 7, 42)], quelle: ["Apple Watch"] },
+    { typ: "Geh- und Laufstrecke", werte: [3100, 3050], einheit: "m", start: [iso(t, 7, 1), iso(t, 7, 22)], ende: [iso(t, 7, 21), iso(t, 7, 41)], quelle: ["Apple Watch", "Apple Watch"] },
+    { typ: "Herzfrequenz", werte: [128, 136, 141, 70], start: [iso(t, 7, 5), iso(t, 7, 20), iso(t, 7, 35), iso(t, 10)] },
+    { typ: "Laufgeschwindigkeit", werte: [8.9, 9.1], einheit: "km/h", start: [iso(t, 7, 10), iso(t, 7, 30)] }
+  ];
+  const r = await fetch(base + "/api/import", { method: "POST", headers: { Authorization: "Bearer " + hkey, "Content-Type": "application/json" }, body: JSON.stringify({ daten: items }) });
+  if (r.status !== 200) fail("Import fehlgeschlagen: " + r.status + " " + await r.text());
+}
+await page.reload(); await page.waitForSelector("#newKey");
+if (!(await page.textContent("body")).includes("Letzte Übertragung")) fail("Status der Übertragung fehlt");
+await page.goto(base + "/#/statistik"); await page.waitForSelector(".seg");
+await page.click("[data-st='health']"); await page.waitForSelector(".htile");
+await shot("22-gesundheit", true);
+await page.click("[data-metric='rhr']"); await page.waitForSelector(".sheet svg.chart");
+await shot("23-ruhepuls");
+await page.goto(base + "/#/heute"); await page.reload(); await page.waitForSelector(".hero");
+if (!(await page.textContent("body")).includes("Erholung")) fail("Erholungs-Hinweis fehlt");
+if (!(await page.textContent("body")).includes("5:30 h")) fail("Schlaf auf der Startseite falsch");
+await shot("24-heute-health", true);
 
 // v0.2: im Training überspringen und Übung hinzufügen
 await page.goto(base + "/#/tag/2026-11-21"); await page.waitForSelector(".ex");

@@ -17,6 +17,13 @@ Läuft kostenlos auf Cloudflare Workers mit einer D1-Datenbank. Nur für eine Pe
 - **Statistik**: Einheiten und Laufkilometer pro Woche, Planquote, Zone-2-Pace-Verlauf, Kraft-Fortschritt je Übung
 - **Ich**: Krank/Einschränkungen, Planstart, Passwort ändern, andere Geräte abmelden, Datenexport (JSON)
 
+## Apple Health (Kurzbefehl)
+
+- Ich → Apple Health: Import-Schlüssel erzeugen (nur schreiben, sperrbar), Anleitung für den Kurzbefehl „Fitness Sync“, Status und Diagnose der letzten Übertragung, „Jetzt übertragen“ (`shortcuts://run-shortcut`), alle Health-Daten löschen
+- `POST /api/import` mit `Authorization: Bearer fit_…`; Inhalt `{ daten: [{ typ, werte, start, ende, quelle, einheit }] }` – Felder als Liste oder Text mit Zeilenumbrüchen; Zeiten ISO oder deutsch; Typnamen deutsch oder englisch (`public/health.js`)
+- Gespeichert werden nur Tageswerte (`health_daily`) und Trainings (`workouts`); Summen ohne Doppelzählung iPhone/Watch, Schlaf mit Phasen (Nacht = Aufwachtag), Trainings mit Distanz/Puls/Energie aus dem Trainingszeitraum
+- Statistik → Gesundheit (Ø 7 Tage, Trend, Verlauf), Startseite mit Schlaf/Ruhepuls/HRV, Lauf-Werte aus Health übernehmen, Coach-Hinweis bei niedriger Erholung (Ruhepuls +6, HRV −20 %, Schlaf < 6 h)
+
 ## iPhone
 
 Optimiert für iPhone (getestet mit 390 × 844 pt wie iPhone 13 Pro, 3-fache Auflösung, Touch): Ränder um Notch und Home-Leiste, Bedienelemente mindestens 44 pt, kein Doppeltipp-Zoom, Eingabefelder ohne Auto-Zoom (16 pt), nichts breiter als der Bildschirm (wird im Klicktest für jede Ansicht geprüft). Als Web-App zum Home-Bildschirm hinzufügen (Safari → Teilen → „Zum Home-Bildschirm“).
@@ -41,7 +48,8 @@ Optimiert für iPhone (getestet mit 390 × 844 pt wie iPhone 13 Pro, 3-fache Auf
 | `public/coach.js` | Regeln für Empfehlungen und Anpassungen |
 | `public/anim.js` | Strichfiguren-Animationen (SVG) |
 | `public/app.js`, `index.html`, `style.css` | Oberfläche |
-| `d1-schema.sql` | Tabellen `settings`, `sessions`, `login_attempts`, `logs`, `plans` |
+| `public/health.js` | Apple-Health-Typen, Auswertung der Übertragung (Tageswerte, Schlaf, Trainings) |
+| `d1-schema.sql` | Tabellen `settings`, `sessions`, `login_attempts`, `logs`, `plans`, `health_daily`, `workouts` |
 | `test/*.test.mjs` | Tests (`npm test`) |
 | `test/dev.mjs`, `test/e2e.mjs` | Lokaler Testserver (Einrichtungscode `TEST-CODE-1234`) und Klicktest mit Playwright |
 

@@ -1,0 +1,272 @@
+// Apple-Health-Daten: welche Werte es gibt, wie sie heißen und wie aus Einzelmessungen Tageswerte werden.
+// Wird vom Server (Import) und von der Oberfläche (Anzeige) benutzt. Keine Abhängigkeiten.
+
+export const TZ = "Europe/Berlin";
+
+// Tageswerte. agg: sum (Summe, je Quelle – höchste Quelle zählt, damit iPhone + Watch nicht doppelt zählen),
+// avg (Durchschnitt), hr (min/Ø/max), stand (Stehstunden zählen), sleep (Schlafphasen), workout (Trainings)
+// better: "high" / "low" = was eine Verbesserung ist (für die Pfeile in der Statistik)
+export const METRICS = {
+  steps:        { label: "Schritte", unit: "", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
+  dist:         { label: "Geh- & Laufstrecke", unit: "km", dec: 1, agg: "sum", group: "Aktivität", better: "high" },
+  active_kcal:  { label: "Aktive Energie", unit: "kcal", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
+  exercise_min: { label: "Trainingsminuten", unit: "Min.", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
+  stand_h:      { label: "Stehstunden", unit: "h", dec: 0, agg: "stand", group: "Aktivität", better: "high" },
+  floors:       { label: "Etagen", unit: "", dec: 0, agg: "sum", group: "Aktivität", better: "high" },
+  rhr:          { label: "Ruhepuls", unit: "bpm", dec: 0, agg: "avg", group: "Herz", better: "low" },
+  hr_avg:       { label: "Puls Ø", unit: "bpm", dec: 0, agg: "derived", group: "Herz" },
+  hr_min:       { label: "Puls min.", unit: "bpm", dec: 0, agg: "derived", group: "Herz" },
+  hr_max:       { label: "Puls max.", unit: "bpm", dec: 0, agg: "derived", group: "Herz" },
+  hrv:          { label: "HRV", unit: "ms", dec: 0, agg: "avg", group: "Herz", better: "high" },
+  vo2:          { label: "VO₂max", unit: "", dec: 1, agg: "avg", group: "Herz", better: "high" },
+  hr_recovery:  { label: "Puls-Erholung", unit: "bpm", dec: 0, agg: "avg", group: "Herz", better: "high" },
+  walk_hr:      { label: "Gehpuls", unit: "bpm", dec: 0, agg: "avg", group: "Herz", better: "low" },
+  spo2:         { label: "Blutsauerstoff", unit: "%", dec: 0, agg: "avg", group: "Herz" },
+  bp_sys:       { label: "Blutdruck systolisch", unit: "mmHg", dec: 0, agg: "avg", group: "Herz" },
+  bp_dia:       { label: "Blutdruck diastolisch", unit: "mmHg", dec: 0, agg: "avg", group: "Herz" },
+  sleep_total:  { label: "Schlaf", unit: "h", dec: 1, agg: "derived", group: "Schlaf", better: "high" },
+  sleep_deep:   { label: "Tiefschlaf", unit: "h", dec: 1, agg: "derived", group: "Schlaf" },
+  sleep_rem:    { label: "REM", unit: "h", dec: 1, agg: "derived", group: "Schlaf" },
+  sleep_core:   { label: "Kernschlaf", unit: "h", dec: 1, agg: "derived", group: "Schlaf" },
+  sleep_awake:  { label: "Wach", unit: "h", dec: 1, agg: "derived", group: "Schlaf" },
+  resp:         { label: "Atemfrequenz", unit: "/min", dec: 1, agg: "avg", group: "Schlaf" },
+  wrist_temp:   { label: "Handgelenktemperatur", unit: "°C", dec: 2, agg: "avg", group: "Schlaf" },
+  run_speed:    { label: "Laufgeschwindigkeit", unit: "km/h", dec: 1, agg: "avg", group: "Laufen", better: "high" },
+  run_power:    { label: "Laufleistung", unit: "W", dec: 0, agg: "avg", group: "Laufen" },
+  run_stride:   { label: "Schrittlänge", unit: "m", dec: 2, agg: "avg", group: "Laufen" },
+  run_gct:      { label: "Bodenkontaktzeit", unit: "ms", dec: 0, agg: "avg", group: "Laufen", better: "low" },
+  run_vo:       { label: "Vertikale Bewegung", unit: "cm", dec: 1, agg: "avg", group: "Laufen", better: "low" },
+  weight:       { label: "Gewicht", unit: "kg", dec: 1, agg: "avg", group: "Körper" },
+  bodyfat:      { label: "Körperfett", unit: "%", dec: 1, agg: "avg", group: "Körper", better: "low" }
+};
+export const GROUPS = ["Herz", "Schlaf", "Aktivität", "Laufen", "Körper"];
+
+// Namen der Health-Typen, wie sie im Kurzbefehl heißen (deutsch und englisch). Vergleich ohne Groß/Klein, Leer- und Sonderzeichen.
+const NAMES = {
+  workout: ["Trainings", "Training", "Workouts", "Workout"],
+  hr: ["Herzfrequenz", "Heart Rate", "Puls"],
+  steps: ["Schritte", "Steps", "Schrittzahl"],
+  dist: ["Geh- und Laufstrecke", "Gehen + Laufen (Distanz)", "Gehen + Laufen", "Gehen und Laufen", "Distanz (Gehen + Laufen)", "Walking + Running Distance", "Walking Running Distance"],
+  active_kcal: ["Aktive Energie", "Aktiver Energieverbrauch", "Active Energy", "Active Energy Burned"],
+  exercise_min: ["Trainingsminuten", "Trainingszeit", "Exercise Minutes", "Apple Exercise Time"],
+  stand_h: ["Stehstunden", "Stehen", "Stand Hours", "Stand Hour", "Apple Stand Hour"],
+  floors: ["Erklommene Etagen", "Etagen", "Flights Climbed"],
+  rhr: ["Ruhepuls", "Ruheherzfrequenz", "Resting Heart Rate"],
+  hrv: ["Herzfrequenzvariabilität", "Herzfrequenz-Variabilität", "HRV", "Heart Rate Variability"],
+  vo2: ["Cardiofitness", "Cardio-Fitness", "VO2 max", "VO2max", "VO₂max", "Cardio Fitness"],
+  hr_recovery: ["Herzfrequenz-Erholung", "Herzfrequenzerholung", "Cardio-Erholung", "Cardio Recovery", "Heart Rate Recovery"],
+  walk_hr: ["Gehpuls-Durchschnitt", "Gehpuls", "Durchschnittliche Herzfrequenz beim Gehen", "Walking Heart Rate Average", "Walking Heart Rate"],
+  spo2: ["Blutsauerstoff", "Sauerstoffsättigung", "Blood Oxygen", "Oxygen Saturation"],
+  bp_sys: ["Blutdruck (systolisch)", "Systolischer Blutdruck", "Blutdruck systolisch", "Blood Pressure Systolic", "Systolic Blood Pressure"],
+  bp_dia: ["Blutdruck (diastolisch)", "Diastolischer Blutdruck", "Blutdruck diastolisch", "Blood Pressure Diastolic", "Diastolic Blood Pressure"],
+  sleep: ["Schlaf", "Schlafanalyse", "Sleep", "Sleep Analysis"],
+  resp: ["Atemfrequenz", "Respiratory Rate"],
+  wrist_temp: ["Handgelenktemperatur", "Handgelenktemperatur im Schlaf", "Temperatur am Handgelenk im Schlaf", "Wrist Temperature", "Sleeping Wrist Temperature"],
+  run_speed: ["Laufgeschwindigkeit", "Running Speed"],
+  run_power: ["Laufleistung", "Running Power"],
+  run_stride: ["Schrittlänge beim Laufen", "Schrittlänge", "Running Stride Length"],
+  run_gct: ["Bodenkontaktzeit", "Bodenkontaktzeit beim Laufen", "Running Ground Contact Time"],
+  run_vo: ["Vertikale Bewegung beim Laufen", "Vertikale Bewegung", "Running Vertical Oscillation"],
+  weight: ["Gewicht", "Körpergewicht", "Weight", "Body Mass"],
+  bodyfat: ["Körperfettanteil", "Körperfett", "Body Fat Percentage", "Body Fat"]
+};
+const norm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/₂/g, "2").replace(/[^a-z0-9]/g, "");
+const NAME_MAP = new Map();
+for (const [k, list] of Object.entries(NAMES)) for (const n of list) NAME_MAP.set(norm(n), k);
+export function typeKey(name) { return NAME_MAP.get(norm(name)) || null; }
+
+// Liste der Typen für die Anleitung (deutsche Namen wie in der Kurzbefehle-App)
+export const SHORTCUT_TYPES = ["Trainings", "Herzfrequenz", "Schritte", "Geh- und Laufstrecke", "Aktive Energie", "Trainingsminuten", "Stehstunden",
+  "Erklommene Etagen", "Ruhepuls", "Herzfrequenzvariabilität", "Cardiofitness", "Herzfrequenz-Erholung", "Gehpuls-Durchschnitt", "Blutsauerstoff",
+  "Blutdruck (systolisch)", "Blutdruck (diastolisch)", "Schlaf", "Atemfrequenz", "Handgelenktemperatur", "Laufgeschwindigkeit", "Laufleistung",
+  "Schrittlänge beim Laufen", "Bodenkontaktzeit", "Vertikale Bewegung beim Laufen", "Gewicht", "Körperfettanteil"];
+
+/* ---------- Werte lesen (Kurzbefehle liefern Listen oder Text mit Zeilenumbrüchen) ---------- */
+export function asList(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") return v.split(/\r?\n/).map(s => s.trim()).filter(s => s.length);
+  return [v];
+}
+// Zahl aus "60", 60, "60,5", "8,2 km", "1.234,5" …; gibt { n, unit } zurück
+export function parseNum(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? { n: v, unit: "" } : null;
+  const s = String(v == null ? "" : v).trim();
+  const m = s.match(/^(-?[\d.,]+)\s*(.*)$/);
+  if (!m) return null;
+  let t = m[1];
+  if (t.includes(",") && t.includes(".")) t = t.lastIndexOf(",") > t.lastIndexOf(".") ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+  else if (t.includes(",")) t = t.replace(",", ".");
+  const n = Number(t);
+  return Number.isFinite(n) ? { n, unit: m[2].trim() } : null;
+}
+
+// Zeitpunkt → Millisekunden. ISO (mit/ohne Zeitzone), „19.11.2026, 08:31(:05)“, „19.11.26 um 8:31“, englische Formate.
+function tzOffsetMin(ms) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms));
+  const g = t => Number(p.find(x => x.type === t).value);
+  return (Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second")) - Math.floor(ms / 1000) * 1000) / 60000;
+}
+function localToMs(y, mo, d, h, mi, s) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, s);
+  let ms = guess - tzOffsetMin(guess) * 60000;
+  ms = guess - tzOffsetMin(ms) * 60000;
+  return ms;
+}
+export function parseTime(v) {
+  if (v == null || v === "") return NaN;
+  if (typeof v === "number") return v > 1e12 ? v : v * 1000;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?$/);
+  if (m) {
+    if (m[7]) return Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4].padStart(2, "0")}:${m[5]}:${m[6] || "00"}${m[7].length === 5 ? m[7].slice(0, 3) + ":" + m[7].slice(3) : m[7]}`);
+    return localToMs(+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0));
+  }
+  m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4}),?\s*(?:um\s*)?(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) { const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return localToMs(y, +m[2], +m[1], +m[4], +m[5], +(m[6] || 0)); }
+  m = s.match(/^(\d{1,2})\.\s*([A-Za-zäÄ]+)\.?\s*(\d{4}),?\s*(?:um\s*)?(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const mon = ["jan", "feb", "mär", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "dez"].findIndex(x => m[2].toLowerCase().replace("ae", "ä").startsWith(x)) + 1;
+    if (mon > 0) return localToMs(+m[3], mon, +m[1], +m[4], +m[5], +(m[6] || 0));
+  }
+  const p = Date.parse(s.replace(/\s+at\s+/i, " ").replace(/\s+um\s+/i, " "));
+  return p;
+}
+export function localDate(ms) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+}
+
+// Einheiten angleichen
+function convert(key, n, unit) {
+  const u = String(unit || "").toLowerCase().replace(/\s/g, "");
+  if (key === "dist") return u === "m" ? n / 1000 : u === "mi" ? n * 1.609344 : u === "yd" ? n * 0.0009144 : n;
+  if (key === "active_kcal") return u === "kj" ? n / 4.184 : n;
+  if (key === "weight") return u === "lb" || u === "lbs" ? n * 0.45359237 : u === "g" ? n / 1000 : n;
+  if (key === "spo2" || key === "bodyfat") return n <= 1 && u !== "%" ? n * 100 : n;
+  if (key === "run_speed") return u === "m/s" || u === "ms" ? n * 3.6 : u === "mi/h" || u === "mph" ? n * 1.609344 : n;
+  if (key === "run_stride") return u === "cm" ? n / 100 : n;
+  if (key === "run_gct") return u === "s" ? n * 1000 : n;
+  if (key === "run_vo") return u === "m" ? n * 100 : u === "mm" ? n / 10 : n;
+  if (key === "wrist_temp") return u.includes("f") ? n * 5 / 9 : n;   // Abweichung in °F → °C
+  if (key === "exercise_min") return u === "s" ? n / 60 : u === "h" || u === "hr" ? n * 60 : n;
+  return n;
+}
+
+function union(intervals) {
+  const a = intervals.filter(i => i[1] > i[0]).sort((x, y) => x[0] - y[0]);
+  let total = 0, cs = -1, ce = -1;
+  for (const [s, e] of a) { if (s > ce) { if (ce > cs) total += ce - cs; cs = s; ce = e; } else if (e > ce) ce = e; }
+  if (ce > cs) total += ce - cs;
+  return total;
+}
+function sleepStage(v) {
+  const t = String(v || "").toLowerCase();
+  if (/bett|inbed|in bed/.test(t)) return "inbed";
+  if (/wach|awake/.test(t)) return "awake";
+  if (/tief|deep/.test(t)) return "deep";
+  if (/rem/.test(t)) return "rem";
+  if (/kern|core|leicht|light/.test(t)) return "core";
+  if (/schlaf|asleep|sleep/.test(t)) return "asleep";
+  const n = Number(t);   // HealthKit-Codes: 0 im Bett, 1 schlafend, 2 wach, 3 Kern, 4 Tief, 5 REM
+  return ["inbed", "asleep", "awake", "core", "deep", "rem"][n] || null;
+}
+
+/* ---------- Auswertung einer Übertragung ---------- */
+// items: [{ typ, werte, start, ende, quelle, einheit }] – Felder als Liste oder Text.
+// Gibt { daily: [{date, metric, value}], workouts: [...], summary: [{typ, key, count, days}] } zurück.
+export function aggregate(items) {
+  const samples = {}, summary = [];
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || typeof it !== "object") continue;
+    const typ = String(it.typ ?? it.type ?? it.Typ ?? "").slice(0, 60);
+    const key = typeKey(typ);
+    const vals = asList(it.werte ?? it.wert ?? it.values ?? it.Werte), st = asList(it.start ?? it.starts ?? it.Startdatum), en = asList(it.ende ?? it.ends ?? it.Enddatum);
+    const src = asList(it.quelle ?? it.sources ?? it.Quelle), units = asList(it.einheit ?? it.unit ?? it.Einheit);
+    const list = [];
+    const n = Math.max(vals.length, st.length);
+    for (let i = 0; i < n && i < 50000; i++) {
+      const s = parseTime(st[i]), e = parseTime(en[i] ?? st[i]);
+      if (!Number.isFinite(s)) continue;
+      list.push({ v: vals[i], s, e: Number.isFinite(e) && e >= s ? e : s, src: String(src[i] ?? src[0] ?? ""), unit: String(units[i] ?? units[0] ?? "") });
+    }
+    summary.push({ typ, key, count: list.length, days: new Set(list.map(x => localDate(x.s))).size });
+    if (key && list.length) (samples[key] = samples[key] || []).push(...list);
+  }
+  const daily = [];
+  const put = (date, metric, value) => { if (Number.isFinite(value)) daily.push({ date, metric, value: Math.round(value * 1000) / 1000 }); };
+  const num = (key, x) => { const p = parseNum(x.v); return p ? convert(key, p.n, x.unit || p.unit) : NaN; };
+  const byDay = (list, f = x => x.s) => { const m = new Map(); for (const x of list) { const d = localDate(f(x)); if (!m.has(d)) m.set(d, []); m.get(d).push(x); } return m; };
+  // Der früheste Tag einer Übertragung ist meist nur teilweise enthalten → weglassen, wenn mehrere Tage da sind
+  const drop = m => { if (m.size > 1) m.delete([...m.keys()].sort()[0]); return m; };
+
+  for (const [key, list] of Object.entries(samples)) {
+    const def = METRICS[key];
+    if (key === "workout" || key === "sleep") continue;
+    if (key === "hr") {
+      for (const [d, l] of drop(byDay(list))) { const v = l.map(x => num(key, x)).filter(Number.isFinite); if (!v.length) continue;
+        put(d, "hr_avg", v.reduce((a, b) => a + b, 0) / v.length); put(d, "hr_min", Math.min(...v)); put(d, "hr_max", Math.max(...v)); }
+      continue;
+    }
+    if (!def) continue;
+    for (const [d, l] of drop(byDay(list))) {
+      if (def.agg === "sum") {
+        const per = new Map();
+        for (const x of l) { const v = num(key, x); if (Number.isFinite(v)) per.set(x.src, (per.get(x.src) || 0) + v); }
+        if (per.size) put(d, key, Math.max(...per.values()));
+      } else if (def.agg === "stand") {
+        const v = l.map(x => parseNum(x.v));
+        if (v.every(Boolean)) put(d, key, v.reduce((a, p) => a + p.n, 0));
+        else { const hours = new Set(l.filter(x => /steh|stand/i.test(String(x.v)) && !/nicht|idle|untätig/i.test(String(x.v))).map(x => Math.floor(x.s / 3600000))); put(d, key, hours.size); }
+      } else {
+        const v = l.map(x => num(key, x)).filter(Number.isFinite);
+        if (v.length) put(d, key, v.reduce((a, b) => a + b, 0) / v.length);
+      }
+    }
+  }
+
+  // Schlaf: Nacht = Tag des Aufwachens; überlappende Quellen (iPhone + Watch) nur einmal zählen
+  if (samples.sleep) {
+    const nights = drop(byDay(samples.sleep, x => x.e));
+    for (const [d, l] of nights) {
+      const st = {}; for (const x of l) { const k = sleepStage(x.v); if (k) (st[k] = st[k] || []).push([x.s, x.e]); }
+      const h = ms => ms / 3600000;
+      const asleep = [...(st.asleep || []), ...(st.core || []), ...(st.deep || []), ...(st.rem || [])];
+      if (asleep.length) put(d, "sleep_total", h(union(asleep)));
+      else if (st.inbed) put(d, "sleep_total", h(union(st.inbed)));
+      for (const k of ["deep", "rem", "core", "awake"]) if (st[k]) put(d, "sleep_" + k, h(union(st[k])));
+    }
+  }
+
+  // Trainings: Distanz, Energie, Puls und Laufwerte aus den Messungen im Zeitraum des Trainings
+  const workouts = [];
+  const inWin = (key, w) => (samples[key] || []).filter(x => x.s >= w.s - 30000 && x.s <= w.e + 30000);
+  const sumBest = (key, w) => { const per = new Map(); for (const x of inWin(key, w)) { const v = num(key, x); if (Number.isFinite(v)) per.set(x.src, (per.get(x.src) || 0) + v); } return per.size ? Math.max(...per.values()) : null; };
+  const avgOf = (key, w) => { const v = inWin(key, w).map(x => num(key, x)).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const seen = new Set();
+  for (const w of samples.workout || []) {
+    const id = new Date(Math.round(w.s / 60000) * 60000).toISOString();
+    if (seen.has(id)) continue; seen.add(id);
+    const label = parseNum(w.v) ? "Training" : String(w.v || "Training").slice(0, 60);
+    const hr = inWin("hr", w).map(x => num("hr", x)).filter(Number.isFinite);
+    const r = x => x == null ? null : Math.round(x * 100) / 100;
+    workouts.push({ id, date: localDate(w.s), start: new Date(w.s).toISOString(), end: new Date(w.e).toISOString(), kind: label,
+      run: /lauf|run|jog/i.test(label), min: r((w.e - w.s) / 60000), km: r(sumBest("dist", w)), kcal: r(sumBest("active_kcal", w)),
+      hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null,
+      speed: r(avgOf("run_speed", w)), power: r(avgOf("run_power", w)), stride: r(avgOf("run_stride", w)), gct: r(avgOf("run_gct", w)), source: w.src.slice(0, 60) });
+  }
+  return { daily, workouts, summary };
+}
+
+/* ---------- Für die Anzeige ---------- */
+export function fmtVal(key, v) {
+  const d = METRICS[key];
+  if (v == null || !Number.isFinite(v)) return "–";
+  if (d && d.unit === "h" && key.startsWith("sleep")) { const m = Math.round(v * 60); return Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0") + " h"; }
+  const s = v.toFixed(d ? d.dec : 1).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return s + (d && d.unit ? " " + d.unit : "");
+}
+// Durchschnitt eines Werts über Tage [von, bis] (inklusive), nur vorhandene Tage
+export function avgRange(daily, metric, from, to) {
+  const v = daily.filter(r => r.metric === metric && r.date >= from && r.date <= to).map(r => r.value);
+  return v.length ? { v: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
+}

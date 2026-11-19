@@ -4,9 +4,10 @@
 // strenge Content-Security-Policy, Sperre nach Fehlversuchen. Ohne Anmeldung ist außer Login, Icon und CSS nichts erreichbar.
 import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, randomCode, safeEqual } from "./auth.js";
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
+import { aggregate } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.3.2";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.4.0";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,6 +30,8 @@ export default {
       }
 
       const settings = await getSettings(env);
+      // Apple-Health-Import vom Kurzbefehl: eigener Schlüssel, darf nur schreiben
+      if (path === "/api/import" && request.method === "POST") return await importHealth(request, env, settings);
       if (!settings.pw_hash) return await setupFlow(request, env, settings, url);
 
       if (path === "/login" && request.method === "POST") return await login(request, env, settings);
@@ -72,7 +75,7 @@ async function api(request, env, settings, url, session) {
       .map(p => ({ id: p.id, family: p.family, name: p.name, version: p.version, status: p.status, changes: parseArr(p.changes), note: p.note || "", start: p.start,
         createdAt: p.created_at, appliedAt: p.applied_at, archivedAt: p.archived_at }));
     return json({
-      start: plan.start, plan: planOut(plan), plans,
+      start: plan.start, plan: planOut(plan), plans, health: await healthData(env, settings, 40),
       overrides: parseObj(settings.overrides), status: parseObj(settings.status), decisions: parseObj(settings.decisions), planner: parseObj(settings.planner),
       logs: results.map(r => ({ id: r.id, date: r.date, kind: r.kind, status: r.status, data: parseObj(r.data), updatedAt: r.updated_at })),
       sessions: Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE expires_at > ?").bind(new Date().toISOString()).first()).n)
@@ -175,10 +178,31 @@ async function api(request, env, settings, url, session) {
     return json({ ok: true });
   }
 
+  /* --- Apple Health --- */
+  if (path === "/api/health" && method === "GET") {
+    const days = Math.min(730, Math.max(7, Number(url.searchParams.get("days")) || 120));
+    return json(await healthData(env, settings, days));
+  }
+  if (path === "/api/health/key" && method === "POST") {      // neuen Import-Schlüssel erzeugen (wird nur einmal angezeigt)
+    const key = "fit_" + randomHex(24);
+    await env.DB.batch([setSetting(env, "import_hash", await sha256(key)), setSetting(env, "import_created", new Date().toISOString())]);
+    return json({ ok: true, key, url: url.origin + "/api/import" });
+  }
+  if (path === "/api/health/revoke" && method === "POST") {
+    await env.DB.prepare("DELETE FROM settings WHERE key IN ('import_hash', 'import_created')").run();
+    return json({ ok: true });
+  }
+  if (path === "/api/health/delete" && method === "POST") {
+    await env.DB.batch([env.DB.prepare("DELETE FROM health_daily"), env.DB.prepare("DELETE FROM workouts"), env.DB.prepare("DELETE FROM settings WHERE key = 'import_last'")]);
+    return json({ ok: true });
+  }
+
   if (path === "/api/export" && method === "GET") {
     const { results } = await env.DB.prepare("SELECT id, date, kind, status, data, updated_at FROM logs ORDER BY date").all();
     const plans = (await env.DB.prepare("SELECT * FROM plans WHERE status <> 'discarded' ORDER BY id").all()).results.map(planOut);
-    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, plans, overrides: parseObj(settings.overrides), status: parseObj(settings.status),
+    const health = { daily: (await env.DB.prepare("SELECT date, metric, value FROM health_daily ORDER BY date").all()).results,
+      workouts: (await env.DB.prepare("SELECT * FROM workouts ORDER BY start").all()).results };
+    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, plans, health, overrides: parseObj(settings.overrides), status: parseObj(settings.status),
       logs: results.map(r => ({ ...r, data: parseObj(r.data) })) };
     return new Response(JSON.stringify(out, null, 1), { headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="fitness-export-${out.exportedAt.slice(0, 10)}.json"`, "Cache-Control": "no-store", ...SEC } });
   }
@@ -228,6 +252,48 @@ export function cleanJson(v, depth) {
   }
   return undefined;
 }
+/* ---------- Apple Health ---------- */
+async function importHealth(request, env, settings) {
+  const ip = "import:" + ipOf(request);   // eigener Zähler – ein falsch eingerichteter Kurzbefehl sperrt nicht die Anmeldung
+  if (await tooManyFails(env, ip)) return json({ error: "Zu viele Versuche." }, 429);
+  const m = (request.headers.get("Authorization") || "").match(/^Bearer\s+(fit_[a-f0-9]{48})$/);
+  if (!m || !settings.import_hash || !safeEqual(await sha256(m[1]), settings.import_hash)) { await fail(env, ip); return json({ error: "Schlüssel ungültig." }, 401); }
+  let body;
+  try { const t = await request.text(); if (t.length > 8000000) return json({ error: "Zu viele Daten auf einmal – bitte weniger Tage übertragen." }, 413); body = parseLoose(t); }
+  catch (e) { await saveImportLast(env, { at: new Date().toISOString(), ok: false, error: "Konnte die Daten nicht lesen." }); return json({ error: "Konnte die Daten nicht lesen." }, 400); }
+  const items = Array.isArray(body) ? body : body && (body.daten || body.items || body.data);
+  const list = (Array.isArray(items) ? items : typeof items === "string" ? [parseLoose(items)].flat() : []).flat().map(x => typeof x === "string" ? parseLoose(x) : x);
+  const { daily, workouts, summary } = aggregate(list);
+  const now = new Date().toISOString(), ops = [];
+  for (const r of daily) ops.push(env.DB.prepare("INSERT INTO health_daily (date, metric, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(date, metric) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(r.date, r.metric, r.value, now));
+  for (const x of workouts) ops.push(env.DB.prepare(`INSERT INTO workouts (id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET end = excluded.end, kind = excluded.kind, run = excluded.run, min = excluded.min,
+    km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
+    speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)
+    .bind(x.id, x.date, x.start, x.end, x.kind, x.run ? 1 : 0, x.min, x.km, x.kcal, x.hr_avg, x.hr_max, x.speed, x.power, x.stride, x.gct, x.source, now));
+  for (let i = 0; i < ops.length; i += 80) await env.DB.batch(ops.slice(i, i + 80));
+  const last = { at: now, ok: true, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
+    unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
+    sample: summary.length ? "" : String(JSON.stringify(body) || "").slice(0, 600) };
+  await saveImportLast(env, last);
+  return json({ ok: true, tage: daily.length, trainings: workouts.length, unbekannt: last.unknown });
+}
+// JSON lesen; Kurzbefehle schicken manchmal Text statt Listen – dann trotzdem versuchen
+function parseLoose(t) {
+  if (typeof t !== "string") return t;
+  const s = t.trim(); if (!s) return null;
+  try { return JSON.parse(s); } catch (e) {}
+  try { return JSON.parse("[" + s.replace(/}\s*[\r\n,]+\s*{/g, "},{") + "]"); } catch (e) {}   // mehrere Objekte untereinander
+  return s;
+}
+async function saveImportLast(env, o) { await setSetting(env, "import_last", JSON.stringify(o)).run(); }
+async function healthData(env, settings, days) {
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const daily = (await env.DB.prepare("SELECT date, metric, value FROM health_daily WHERE date >= ? ORDER BY date").bind(since).all()).results;
+  const workouts = (await env.DB.prepare("SELECT id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source FROM workouts WHERE date >= ? ORDER BY start DESC").bind(since).all()).results;
+  return { daily, workouts, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
+}
+
 /* ---------- Pläne ---------- */
 // Aktiver Plan; gibt es noch keinen (erste Version), wird der Standardplan als Version 1 angelegt.
 async function activePlan(env, settings) {

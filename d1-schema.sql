@@ -45,3 +45,18 @@ CREATE TABLE IF NOT EXISTS plans (
   archived_at TEXT
 );
 CREATE INDEX IF NOT EXISTS plans_status ON plans(status);
+
+-- Apple Health: Tageswerte (aus dem Kurzbefehl, schon zusammengefasst – keine Einzelmessungen)
+CREATE TABLE IF NOT EXISTS health_daily (
+  date       TEXT NOT NULL,
+  metric     TEXT NOT NULL,
+  value      REAL NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (date, metric)
+);
+-- Apple Health: Trainings mit Werten aus dem Trainingszeitraum
+CREATE TABLE IF NOT EXISTS workouts (
+  id TEXT PRIMARY KEY, date TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '', run INTEGER NOT NULL DEFAULT 0,
+  min REAL, km REAL, kcal REAL, hr_avg REAL, hr_max REAL, speed REAL, power REAL, stride REAL, gct REAL, source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workouts_date ON workouts(date);

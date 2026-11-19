@@ -1,6 +1,7 @@
 // Fitness – Oberfläche. Läuft nur nach Anmeldung; Daten kommen von /api (Cloudflare Worker + D1).
 import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, sourceDay, swapDays, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
-import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK } from "./coach.js";
+import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK, readiness } from "./coach.js";
+import { METRICS, GROUPS as HGROUPS, SHORTCUT_TYPES, fmtVal, avgRange } from "./health.js";
 import { mount, still } from "./anim.js";
 
 const $app = document.getElementById("app"), $rest = document.getElementById("rest");
@@ -44,7 +45,7 @@ document.addEventListener("visibilitychange", () => {
 /* ---------- Hilfen ---------- */
 function todayIso() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function longDate(iso) { const [y, m, d] = iso.split("-").map(Number); return DAY_NAMES[dayIndex(iso)] + ", " + d + ". " + MONTHS[m - 1]; }
-function planState() { return { start: S.start, plan: S.plan.data, overrides: S.overrides, status: S.status, logs: S.logs }; }
+function planState() { return { start: S.start, plan: S.plan.data, overrides: S.overrides, status: S.status, logs: S.logs, health: S.health }; }
 function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
 function stopAnims() { stops.forEach(f => f()); stops = []; }
 const num = v => { const n = Number(String(v).replace(",", ".")); return Number.isFinite(n) ? n : 0; };
@@ -83,7 +84,7 @@ function render() {
   if (r[0] === "plan") return r[1] === "bearbeiten" ? viewPlanEdit() : r[1] === "versionen" ? viewVersions() : r[1] === "archiv" ? viewArchive()
     : r[1] === "planer" ? viewPlanner() : r[1] === "ansehen" ? viewPlanById(Number(r[2])) : viewPlan();
   if (r[0] === "statistik") return viewStats();
-  if (r[0] === "mehr") return viewMore();
+  if (r[0] === "mehr") return r[1] === "health" ? viewHealthSetup() : viewMore();
   return viewToday();
 }
 window.scrollToTop = () => window.scrollTo(0, 0);
@@ -119,6 +120,7 @@ function viewToday() {
     <h1>${week == null ? "Plan startet am " + fmtDate(S.start) : week > P.weeks ? "Plan geschafft 🎉" : "Woche " + week + " von " + P.weeks}</h1>
     <p class="mute small" style="margin:0 0 14px">${esc(P.name)} · Version ${S.plan.version}${week && week <= P.weeks ? " · " + esc(focusFor(P, week).text) : ""}</p>
     ${chips.length ? `<div class="row wrap" style="margin-bottom:12px">${chips.join("")}</div>` : ""}
+    ${healthLine()}
     <div class="weekstrip" style="margin-bottom:12px">${weekHtml}</div>
     <div class="hero ${heroKind}">
       <div class="row"><div class="k grow">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}${s.movedFrom != null ? " · getauscht mit " + esc(DAY_NAMES[s.movedFrom]) : ""}</div>
@@ -508,6 +510,9 @@ function viewRun(date, s) {
       ${zoneBar}
       <ul class="steps">${s.steps.map((st, i) => `<li class="${st.hard ? "hard" : ""}"><button class="check ${data.steps[i] ? "on" : ""}" data-step="${i}" aria-label="${esc(st.label)} erledigt">✓</button>
         <div class="grow"><b class="t">${esc(st.label)}</b><div class="mute small">${esc(st.detail)}</div></div></li>`).join("")}</ul></div>
+    ${(() => { const w = workoutFor(date); return w ? `<div class="card sug good"><b>Von Apple Health: ${esc(w.kind)}</b>
+      <p style="margin:6px 0 10px">${[w.min ? Math.round(w.min) + " Min." : "", w.km ? String(w.km.toFixed(2)).replace(".", ",") + " km" : "", w.km && w.min ? paceOf(w.min, w.km) + " min/km" : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : ""].filter(Boolean).map(esc).join(" · ")}</p>
+      <button class="btn sm" id="fromHealth">Werte übernehmen</button></div>` : ""; })()}
     <div class="card"><b>Tipps</b><ul class="cues" style="margin-top:6px">${s.tips.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
       <p class="mute tiny" style="margin:0">Pulszonen (Apple Watch): Ruhepuls ${PROFILE.restHr}, Maximalpuls ${PROFILE.maxHr}.</p></div>
     <div class="card"><b>Werte eintragen</b> <span class="mute small">(optional, für die Statistik)</span>
@@ -524,6 +529,14 @@ function viewRun(date, s) {
   const persist = st => saveLater({ id, date, kind: "run", status: st || (log && log.status === "done" ? "done" : "partial"), data });
   $app.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => { const i = Number(b.dataset.step); data.steps[i] = !data.steps[i]; b.classList.toggle("on", data.steps[i]); persist(); }));
   ["min", "km", "hr"].forEach(k => $app.querySelector("#" + k).addEventListener("input", () => { showPace(); persist(); }));
+  const fh = $app.querySelector("#fromHealth");
+  if (fh) fh.addEventListener("click", () => {
+    const w = workoutFor(date);
+    if (w.min) $app.querySelector("#min").value = String(Math.round(w.min));
+    if (w.km) $app.querySelector("#km").value = String(Math.round(w.km * 100) / 100).replace(".", ",");
+    if (w.hr_avg) $app.querySelector("#hr").value = String(Math.round(w.hr_avg));
+    data.health = w.id; showPace(); persist(); toast("Werte übernommen – jetzt „Lauf erledigt“ tippen");
+  });
   $app.querySelector("#finish").addEventListener("click", () => { readVals(); finishSheet(date, data.feel, data.pain, data.note, async (feel, pain, note) => {
     Object.assign(data, { feel, pain, note, run: s.run, steps: s.steps.map((_, i) => true), pv: planRef() });
     clearTimeout(saveTimer); pending = null;
@@ -753,6 +766,18 @@ function viewPlanner() {
 
 /* ---------- Statistik ---------- */
 function viewStats() {
+  const tabSel = ui.statTab || "training";
+  if (tabSel === "health") {
+    $app.innerHTML = `<h1>Statistik</h1>${statSwitch(tabSel)}` + viewHealthStats();
+    bindStatSwitch();
+    $app.querySelectorAll("[data-metric]").forEach(b => b.addEventListener("click", () => healthDetail(b.dataset.metric)));
+    return;
+  }
+  return viewTrainingStats();
+}
+function statSwitch(sel) { return `<div class="seg" role="tablist"><button data-st="training" class="${sel === "training" ? "on" : ""}">Training</button><button data-st="health" class="${sel === "health" ? "on" : ""}">Gesundheit</button></div>`; }
+function bindStatSwitch() { $app.querySelectorAll("[data-st]").forEach(b => b.addEventListener("click", () => { ui.statTab = b.dataset.st; render(); })); }
+function viewTrainingStats() {
   const today = todayIso(), ps = planState();
   const curW = weekOf(S.start, today) || 0, P = S.plan.data;
   const weeks = [];
@@ -791,7 +816,7 @@ function viewStats() {
     if (pts.length) prog.push({ slot, pts });
   }
 
-  $app.innerHTML = `<h1>Statistik</h1><p class="mute small" style="margin:0 0 12px">${curW ? "Woche " + Math.min(curW, 99) + " seit Planstart" : "Plan hat noch nicht begonnen"}</p>
+  $app.innerHTML = `<h1>Statistik</h1>${statSwitch("training")}<p class="mute small" style="margin:0 0 12px">${curW ? "Woche " + Math.min(curW, 99) + " seit Planstart" : "Plan hat noch nicht begonnen"}</p>
     <div class="kpis">
       <div class="kpi"><b>${thisW.strength + thisW.run}<span class="mute" style="font-size:15px">/${P.days.filter(d => d.kind === "strength" || d.kind === "run").length}</span></b><span>Einheiten diese Woche</span></div>
       <div class="kpi"><b>${thisW.km ? thisW.km.toFixed(1).replace(".", ",") : "0"}</b><span>km diese Woche</span></div>
@@ -810,6 +835,7 @@ function viewStats() {
       const fmt = q => q.weighted ? (q.x.r + " × " + fmtKg(num(q.x.w))) : (q.x.r + (ex.type === "time" ? " s" : " Wdh."));
       return `<div class="prog"><div class="grow"><div class="small"><b>${esc(ex.name)}</b></div><div class="mute small">${p.pts.length > 1 ? esc(fmt(a)) + " → " + esc(fmt(z)) : "bester Satz: " + esc(fmt(z))}</div></div>${spark(p.pts.map(q => q.v))}</div>`;
     }).join("") : `<p class="mute small">Sobald du Sätze abhakst, siehst du hier je Übung deinen besten Satz und den Verlauf.</p>`}</div></div>`;
+  bindStatSwitch();
 }
 function stackChart(rows) {
   const W = 320, H = 140, pad = 22, bw = Math.min(28, (W - 20) / rows.length - 8), max = Math.max(7, ...rows.map(r => r.strength + r.run + r.recovery));
@@ -862,6 +888,8 @@ function viewMore() {
       <label class="f" style="margin-top:14px">Einschränkungen (Schmerzen, Verletzung)</label>
       <div class="row wrap">${Object.entries(REGIONS).map(([k, v]) => `<span class="chip ${lim.has(k) ? "on" : ""}" data-lim="${k}">${esc(v)}</span>`).join("")}</div>
       <p class="mute tiny" style="margin:10px 0 0">Kein Ersatz für ärztlichen Rat. Bei starken oder anhaltenden Schmerzen, Brustschmerz oder Atemnot bitte abklären lassen.</p></div>
+    <a class="card row" href="#/mehr/health" style="text-decoration:none;color:inherit"><div class="grow"><b>Apple Health</b>
+      <div class="mute small">${S.health && S.health.last && S.health.last.at ? "Letzte Übertragung " + esc(fmtWhen(S.health.last.at)) : S.health && S.health.hasKey ? "Schlüssel erzeugt – Kurzbefehl einrichten" : "Noch nicht eingerichtet"}</div></div><span class="mute">›</span></a>
     <div class="card"><b>Planstart</b><p class="mute small" style="margin:4px 0 8px">Montag der Woche 1. Danach richtet sich, welche Woche gerade dran ist.</p>
       <div class="row"><input type="date" id="start" value="${esc(S.start)}"><button class="btn sm" id="saveStart">Speichern</button></div></div>
     <div class="card"><b>Sicherheit</b>
@@ -872,7 +900,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.3.2</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.4.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -896,6 +924,133 @@ function viewMore() {
     try { await api("/api/password", { old: $app.querySelector("#pwOld").value, new: $app.querySelector("#pwNew").value }); toast("Passwort geändert, andere Geräte abgemeldet"); await load(); render(); } catch (e) { toast(e.message); }
   });
   $app.querySelector("#others").addEventListener("click", async () => { try { await api("/api/logout-all", {}); await load(); toast("Andere Geräte abgemeldet"); render(); } catch (e) { toast(e.message); } });
+}
+
+/* ---------- Apple Health ---------- */
+const SHORTCUT_NAME = "Fitness Sync";
+function healthDays(days) { return (S.health && S.health.daily || []).filter(r => r.date >= addDays(todayIso(), -days + 1)); }
+function lastVal(metric) { const l = (S.health && S.health.daily || []).filter(r => r.metric === metric).sort((a, b) => a.date < b.date ? 1 : -1)[0]; return l || null; }
+function fmtWhen(iso) { if (!iso) return "–"; const d = new Date(iso); return d.toLocaleDateString("de-DE", { day: "numeric", month: "numeric" }) + ", " + d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr"; }
+
+// Kurzzeile auf der Startseite: Schlaf, Ruhepuls, HRV
+function healthLine() {
+  const today = todayIso(), out = [];
+  const sl = (S.health && S.health.daily || []).find(r => r.metric === "sleep_total" && r.date === today);
+  if (sl) out.push("😴 " + fmtVal("sleep_total", sl.value));
+  for (const m of ["rhr", "hrv"]) { const l = lastVal(m); if (l && l.date >= addDays(today, -1)) out.push((m === "rhr" ? "❤️ " : "〰️ HRV ") + fmtVal(m, l.value)); }
+  return out.length ? `<p class="small" style="margin:-6px 0 12px">${out.map(esc).join(" · ")}</p>` : "";
+}
+
+// Lauf aus Apple Health für einen Tag
+function workoutFor(date) {
+  const w = (S.health && S.health.workouts || []).filter(x => x.date === date);
+  return w.find(x => x.run) || (w.length === 1 ? w[0] : null);
+}
+
+// Einrichtung und Status (Ich → Apple Health)
+function viewHealthSetup() {
+  const H = S.health || {}, last = H.last || {};
+  const typesText = SHORTCUT_TYPES.join("\n");
+  const step = (n, t, body) => `<li><b>${t}</b><div class="small" style="margin-top:4px">${body}</div></li>`;
+  $app.innerHTML = `<div class="top"><a class="back" href="#/mehr" aria-label="Zurück">‹</a><div class="grow"><div class="mute small">Ich</div><h1 style="font-size:24px">Apple Health</h1></div></div>
+    <div class="card"><b>Status</b>
+      ${last.at ? `<p class="small" style="margin:6px 0 0">Letzte Übertragung: <b>${esc(fmtWhen(last.at))}</b>${last.ok ? ` · ${last.days} Tageswerte · ${last.workouts} Trainings` : ` · <span style="color:var(--stop)">${esc(last.error || "Fehler")}</span>`}</p>` : `<p class="mute small" style="margin:6px 0 0">Noch keine Übertragung.</p>`}
+      ${last.unknown && last.unknown.length ? `<p class="small" style="color:var(--warn);margin:6px 0 0">Nicht erkannt: ${esc(last.unknown.join(", "))}</p>` : ""}
+      ${last.empty && last.empty.length ? `<p class="mute small" style="margin:6px 0 0">Ohne Werte (in den letzten Tagen nichts gemessen oder kein Zugriff): ${esc(last.empty.join(", "))}</p>` : ""}
+      ${last.items && last.items.length ? `<details style="margin-top:8px"><summary class="small">Details der letzten Übertragung</summary><div class="list">${last.items.map(i => `<div class="it small"><span class="grow">${esc(i.typ)}</span><span class="mute">${i.key ? i.count + " Werte" : "unbekannt"}</span></div>`).join("")}</div></details>` : ""}
+      <div class="row wrap" style="margin-top:12px"><a class="btn sm" href="shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}">Jetzt übertragen</a></div></div>
+
+    <div class="card"><b>1. Import-Schlüssel</b>
+      <p class="mute small" style="margin:4px 0 10px">Damit darf der Kurzbefehl Daten in deine App <b>schreiben</b> – lesen kann er nichts. Der Schlüssel wird nur einmal angezeigt.</p>
+      <div id="keybox">${H.hasKey ? `<p class="small" style="margin:0 0 8px">Schlüssel aktiv seit ${esc(fmtWhen(H.keyCreated))}.</p>` : ""}</div>
+      <div class="row wrap"><button class="btn sm" id="newKey">${H.hasKey ? "Neuen Schlüssel erzeugen" : "Schlüssel erzeugen"}</button>${H.hasKey ? `<button class="btn sm danger" id="revoke">Schlüssel sperren</button>` : ""}</div></div>
+
+    <div class="card"><b>2. Kurzbefehl „${SHORTCUT_NAME}“ bauen</b>
+      <p class="mute small" style="margin:4px 0 6px">In der App <b>Kurzbefehle</b> auf <b>+</b> tippen, Namen „${SHORTCUT_NAME}“ geben, dann diese Aktionen der Reihe nach hinzufügen (über das Suchfeld unten):</p>
+      <ol class="guide">
+        ${step(1, "Text", `Diese Liste einfügen: <button class="btn sm alt" id="copyTypes" style="margin-top:6px">Liste kopieren</button>`)}
+        ${step(2, "Text teilen", "Trennzeichen: <b>Neue Zeilen</b>.")}
+        ${step(3, "Mit jedem Objekt wiederholen", "Eingabe: <b>Geteilter Text</b>. Die folgenden Schritte 4–9 kommen <b>in</b> die Wiederholung.")}
+        ${step(4, "Health-Messungen suchen", "Auf den Typ tippen und <b>Wiederholungsobjekt</b> wählen (Variable). Filter: <b>Startdatum</b> ist in den letzten <b>3 Tagen</b>. Sortieren: Startdatum.")}
+        ${step(5, "Details von Health-Messungen abrufen", "Detail: <b>Wert</b>. Diese Aktion noch dreimal hinzufügen mit <b>Startdatum</b>, <b>Enddatum</b> und <b>Quelle</b> – Eingabe jeweils „Health-Messungen“.")}
+        ${step(6, "Wörterbuch", "Fünf Einträge (Typ Text): <b>typ</b> = Wiederholungsobjekt, <b>werte</b> = Wert, <b>start</b> = Startdatum, <b>ende</b> = Enddatum, <b>quelle</b> = Quelle.")}
+        ${step(7, "Zu Variable hinzufügen", "Wörterbuch zur Variable <b>daten</b> hinzufügen.")}
+        ${step(8, "(Ende Wiederholen)", "steht automatisch da – die nächste Aktion kommt <b>danach</b>.")}
+        ${step(9, "Inhalte von URL abrufen", `URL: <code class="sel" id="impUrl">${esc(location.origin)}/api/import</code> <button class="btn sm alt" data-copy="impUrl">Kopieren</button><br>
+          Methode: <b>POST</b> · Header: <b>Authorization</b> = <b>Bearer</b> + Leerzeichen + dein Schlüssel<br>
+          Anfragetext: <b>JSON</b> · Feld <b>daten</b>, Typ <b>Array</b>, Wert: Variable <b>daten</b> (falls das nicht geht: Anfragetext <b>Datei</b> mit Variable <b>daten</b>).`)}
+      </ol>
+      <p class="mute small" style="margin:8px 0 0">Beim ersten Start fragt das iPhone, welche Health-Daten der Kurzbefehl lesen darf: <b>alle erlauben</b>. Danach hier „Jetzt übertragen“ tippen und den Status oben prüfen. Wenn etwas hakt: Screenshot an Claude.</p></div>
+
+    <div class="card"><b>3. Automatisch jeden Tag</b>
+      <p class="small" style="margin:4px 0 0">Kurzbefehle → <b>Automation</b> → <b>+</b> → <b>Tageszeit</b> (z. B. 21:30, täglich) → <b>Sofort ausführen</b> → Kurzbefehl <b>„${SHORTCUT_NAME}“</b>. Health-Daten sind nur lesbar, wenn das iPhone entsperrt war – eine Zeit wählen, zu der du es meist benutzt.</p>
+      <p class="mute small" style="margin:8px 0 0">Ältere Daten einmalig holen: in Schritt 4 kurz „30 Tage“ einstellen, einmal ausführen, dann wieder auf 3 zurück.</p></div>
+
+    <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Gespeichert werden nur Tageswerte und Trainings, keine Einzelmessungen. Alles liegt in deiner eigenen Datenbank.</p>
+      <button class="btn sm danger" id="delHealth">Alle Health-Daten löschen</button></div>`;
+  const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); toast(msg || "Kopiert"); } catch (e) { toast("Kopieren nicht möglich – bitte markieren und kopieren"); } };
+  $app.querySelector("#copyTypes").addEventListener("click", () => copy(typesText, "Liste kopiert"));
+  $app.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => copy($app.querySelector("#" + b.dataset.copy).textContent)));
+  $app.querySelector("#newKey").addEventListener("click", async () => {
+    if (S.health.hasKey && !window.confirm("Neuen Schlüssel erzeugen? Der alte funktioniert dann nicht mehr – im Kurzbefehl muss er ersetzt werden.")) return;
+    try {
+      const r = await api("/api/health/key", {});
+      S.health.hasKey = true; S.health.keyCreated = new Date().toISOString();
+      $app.querySelector("#keybox").innerHTML = `<p class="small" style="margin:0 0 6px">Dein Schlüssel (nur jetzt sichtbar):</p><code class="sel key" id="theKey">${esc(r.key)}</code>
+        <div class="row wrap" style="margin:8px 0 10px"><button class="btn sm alt" id="copyKey">Schlüssel kopieren</button><button class="btn sm alt" id="copyHeader">„Bearer …“ kopieren</button></div>`;
+      $app.querySelector("#copyKey").addEventListener("click", () => copy(r.key));
+      $app.querySelector("#copyHeader").addEventListener("click", () => copy("Bearer " + r.key, "Header-Wert kopiert"));
+    } catch (e) { toast(e.message); }
+  });
+  const rv = $app.querySelector("#revoke");
+  if (rv) rv.addEventListener("click", async () => { if (!window.confirm("Schlüssel sperren? Der Kurzbefehl kann dann nichts mehr übertragen.")) return; await api("/api/health/revoke", {}); await load(); render(); toast("Schlüssel gesperrt"); });
+  $app.querySelector("#delHealth").addEventListener("click", async () => { if (!window.confirm("Alle übertragenen Health-Daten löschen? Deine Trainingseinträge bleiben.")) return; await api("/api/health/delete", {}); await load(); render(); toast("Health-Daten gelöscht"); });
+}
+
+// Statistik → Gesundheit
+let healthLong = null;
+function viewHealthStats() {
+  const today = todayIso(), D = S.health && S.health.daily || [];
+  const has = m => D.some(r => r.metric === m);
+  const tile = m => {
+    const def = METRICS[m], now = avgRange(D, m, addDays(today, -6), today), before = avgRange(D, m, addDays(today, -27), addDays(today, -7)), last = lastVal(m);
+    let arrow = "";
+    if (now && before && def.better) {
+      const diff = (now.v - before.v) / (Math.abs(before.v) || 1);
+      if (Math.abs(diff) >= 0.03) { const up = diff > 0, good = (up && def.better === "high") || (!up && def.better === "low"); arrow = `<span class="${good ? "ok" : "warnTxt"}">${up ? "▲" : "▼"}</span>`; }
+    }
+    const series = D.filter(r => r.metric === m).slice(-30).map(r => r.value);
+    return `<button class="htile" data-metric="${m}"><span class="mute tiny">${esc(def.label)}</span><b>${now ? esc(fmtVal(m, now.v)) : "–"} ${arrow}</b>
+      <span class="mute tiny">${now ? "Ø 7 Tage" : last ? "zuletzt " + fmtDate(last.date) : ""}</span>${spark(series)}</button>`;
+  };
+  const groups = HGROUPS.map(g => { const ms = Object.keys(METRICS).filter(m => METRICS[m].group === g && has(m) && m !== "hr_min" && m !== "hr_max"); return ms.length ? `<h2>${esc(g)}</h2><div class="htiles">${ms.map(tile).join("")}</div>` : ""; }).join("");
+  const W = (S.health && S.health.workouts || []).slice(0, 12);
+  const rd = readiness(S.health, today);
+  return `${rd.flags.length ? `<div class="note">Erholung: ${esc(rd.flags.join(", "))}</div>` : ""}
+    ${groups || `<div class="card"><b>Noch keine Health-Daten</b><p class="mute small" style="margin:6px 0 10px">Richte einmal den Kurzbefehl ein – dann erscheinen hier Ruhepuls, HRV, Schlaf, VO₂max, Gewicht und mehr.</p><a class="btn sm" href="#/mehr/health">Zur Einrichtung</a></div>`}
+    ${W.length ? `<h2>Trainings (Apple Health)</h2><div class="card list">${W.map(w => `<div class="it small"><div class="grow"><b>${esc(w.kind)}</b> <span class="mute">${fmtDate(w.date)}</span>
+      <div class="mute">${[w.min ? Math.round(w.min) + " Min." : "", w.km ? String(w.km.toFixed(1)).replace(".", ",") + " km" : "", w.km && w.min ? paceOf(w.min, w.km) + " /km" : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : ""].filter(Boolean).join(" · ")}</div></div></div>`).join("")}</div>` : ""}`;
+}
+async function healthDetail(m) {
+  const def = METRICS[m];
+  const bg = sheet(`<h2 style="margin-top:0">${esc(def.label)}</h2><div id="hd"><p class="mute">Lädt …</p></div>`);
+  try { if (!healthLong || Date.now() - healthLong.at > 60000) healthLong = { at: Date.now(), data: await api("/api/health?days=120") }; } catch (e) { bg.querySelector("#hd").textContent = e.message; return; }
+  const rows = healthLong.data.daily.filter(r => r.metric === m);
+  if (!rows.length) { bg.querySelector("#hd").innerHTML = `<p class="mute">Keine Werte.</p>`; return; }
+  const v = rows.map(r => r.value), avg = v.reduce((a, b) => a + b, 0) / v.length;
+  const pts = rows.slice(-60).map(r => ({ label: fmtDate(r.date), v: r.value }));
+  bg.querySelector("#hd").innerHTML = `<div class="grid3" style="margin-bottom:10px"><div class="kpi"><b>${esc(fmtVal(m, rows[rows.length - 1].value))}</b><span>zuletzt (${fmtDate(rows[rows.length - 1].date)})</span></div>
+    <div class="kpi"><b>${esc(fmtVal(m, avg))}</b><span>Ø ${rows.length} Tage</span></div><div class="kpi"><b>${esc(fmtVal(m, Math.min(...v)))} – ${esc(fmtVal(m, Math.max(...v)))}</b><span>Spanne</span></div></div>
+    ${pts.length >= 2 ? valueChart(pts, m) : ""}`;
+}
+function valueChart(pts, m) {
+  const W = 320, H = 150, l = 40, r = 10, t = 12, b = 22;
+  const vs = pts.map(p => p.v), lo0 = Math.min(...vs), hi0 = Math.max(...vs), pad = (hi0 - lo0) * 0.1 || 1, lo = lo0 - pad, hi = hi0 + pad;
+  const x = i => l + i * (W - l - r) / (pts.length - 1), y = v => t + (hi - v) / (hi - lo) * (H - t - b);
+  let g = [lo0, (lo0 + hi0) / 2, hi0].map(v => `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 4}" y="${y(v) + 4}" text-anchor="end">${esc(fmtVal(m, v).replace(/ .*$/, ""))}</text>`).join("");
+  g += `<path class="ln2" d="${pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.v).toFixed(1)).join("")}"/>`;
+  g += `<text x="${l}" y="${H - 6}">${esc(pts[0].label)}</text><text x="${W - r}" y="${H - 6}" text-anchor="end">${esc(pts[pts.length - 1].label)}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf ${esc(METRICS[m].label)}">${g}</svg>`;
 }
 
 /* ---------- Start ---------- */
