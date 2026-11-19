@@ -4,10 +4,10 @@
 // strenge Content-Security-Policy, Sperre nach Fehlversuchen. Ohne Anmeldung ist außer Login, Icon und CSS nichts erreichbar.
 import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, randomCode, safeEqual } from "./auth.js";
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
-import { aggregate } from "../public/health.js";
+import { aggregate, splitByType, asList } from "../public/health.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.4.4";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.4.5";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -274,9 +274,19 @@ async function importHealth(request, env, settings) {
   for (let i = 0; i < ops.length; i += 80) await env.DB.batch(ops.slice(i, i + 80));
   const last = { at: now, ok: true, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
     unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
-    sample: summary.length ? "" : String(JSON.stringify(body) || "").slice(0, 600) };
+    sample: summary.length ? "" : String(JSON.stringify(body) || "").slice(0, 600), probe: probeOf(list) };
   await saveImportLast(env, last);
   return json({ ok: true, tage: daily.length, trainings: workouts.length, unbekannt: last.unknown });
+}
+// Kleine Stichprobe je Typ für die Fehlersuche (Einheiten, Quellen) – keine vollständigen Daten
+function probeOf(list) {
+  try {
+    return splitByType(list).slice(0, 30).map(it => {
+      const v = asList(it.werte), q = asList(it.quelle), s = asList(it.start), e = asList(it.ende), u = asList(it.einheit);
+      const src = {}; q.forEach((x, i) => { const k = String(x).slice(0, 40); src[k] = (src[k] || 0) + 1; });
+      return { typ: String(it.typ).slice(0, 50), n: v.length, werte: v.slice(0, 4).map(x => String(x).slice(0, 30)), start: s.slice(0, 2).map(String), ende: e.slice(0, 2).map(String), einheit: u.slice(0, 1).map(String), quellen: src };
+    });
+  } catch (e) { return []; }
 }
 // JSON lesen; Kurzbefehle schicken manchmal Text statt Listen – dann trotzdem versuchen
 function parseLoose(t) {
