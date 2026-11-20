@@ -336,7 +336,7 @@ export function aggregate(items0, opts = {}) {
     if (!Number.isFinite(end) || seen.has(id)) continue;
     let j = -1;
     for (let k = hrAll.length - 1; k >= 0; k--) if (hrAll[k].s <= end + 180000) { j = k; break; }
-    let start = null, endT = end;
+    let start = null, endT = end, est = false;
     if (j >= 0 && end - hrAll[j].s < 300000) {
       endT = Math.max(hrAll[j].s, Math.min(end, hrAll[j].e));
       let k = j;
@@ -347,21 +347,31 @@ export function aggregate(items0, opts = {}) {
       // Puls nach dem Ende vorhanden, aber kein Trainingsblock: abgebrochenes/verworfenes Training (Watch meldet trotzdem „beendet“)
       if (hrAll.length && hrAll[hrAll.length - 1].s >= end) { removed.push(id); continue; }
       if ((opts.known || []).includes(id)) continue;
-      start = end - (/core|mobil|yoga|dehn|flex/i.test(m.kind) ? 15 : 45) * 60000;
-    } else {
+      start = end - (/core|mobil|yoga|dehn|flex/i.test(m.kind) ? 15 : 45) * 60000; est = true;
+    }
+    const r = x => x == null ? null : Math.round(x * 100) / 100;
+    const build = (wo, parts) => {   // Werte aus allen aktiven Abschnitten (ohne Pausen)
+      const hr = parts.flatMap(p => inWin("hr", p).map(x => num("hr", x))).filter(Number.isFinite);
+      const kc = parts.reduce((a, p) => a + (sumBest("active_kcal", p) || 0), 0);
+      Object.assign(wo, { start: new Date(parts[0].s).toISOString(), end: new Date(parts[parts.length - 1].e).toISOString(),
+        min: r(parts.reduce((a, p) => a + (p.e - p.s), 0) / 60000), kcal: r(kc) || null,
+        hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null });
+    };
+    if (fromMarks.length && !est) {
+      const last = fromMarks[fromMarks.length - 1];
       // Doppelte Meldung für denselben Trainingsblock: nur einmal speichern
-      const dup = fromMarks.find(x => x.s < endT && start < x.e);
-      if (dup) { removed.push(id); continue; }
-      fromMarks.push({ s: start, e: endT });
+      if (last.parts.some(p => p.s < endT && start < p.e)) { removed.push(id); continue; }
+      // Pause: Die Watch meldet beim Pausieren teils „beendet“ – gleiche Art und < 20 Min. Abstand = ein Training
+      if (last.kind === m.kind && start - last.parts[last.parts.length - 1].e <= 20 * 60000) {
+        last.parts.push({ s: start, e: endT }); build(last.wo, last.parts); removed.push(id); continue;
+      }
     }
     seen.add(id);
-    const w = { s: start, e: endT };
-    const hr = inWin("hr", w).map(x => num("hr", x)).filter(Number.isFinite);
-    const r = x => x == null ? null : Math.round(x * 100) / 100;
-    workouts.push({ id, date: localDate(end), start: new Date(start).toISOString(), end: new Date(endT).toISOString(), kind: String(m.kind).slice(0, 60), run: /lauf|run|jog/i.test(m.kind),
-      min: r((endT - start) / 60000), km: null, kcal: r(sumBest("active_kcal", w)) || null,
-      hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null,
-      speed: null, power: null, stride: null, gct: null, source: "Apple Watch" });
+    const wo = { id, date: localDate(end), kind: String(m.kind).slice(0, 60), run: /lauf|run|jog/i.test(m.kind), km: null,
+      speed: null, power: null, stride: null, gct: null, source: "Apple Watch" };
+    build(wo, [{ s: start, e: endT }]);
+    workouts.push(wo);
+    if (!est) fromMarks.push({ kind: m.kind, wo, parts: [{ s: start, e: endT }] });
   }
   return { daily, workouts, summary, removed };
 }

@@ -136,3 +136,15 @@ test("Watch: abgebrochenes und doppelt gemeldetes Training wird verworfen", asyn
   assert.equal(w.length, 1); assert.equal(w[0].id, "w_" + "b".repeat(16)); assert.ok(Math.abs(w[0].min - 12) < 0.5);
   assert.deepEqual(out.removed.sort(), ["w_" + "a".repeat(16), "w_" + "c".repeat(16)]);
 });
+
+test("Watch: Pause mitten im Training ergibt ein Training ohne Pausenzeit", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const t0 = Date.parse("2026-11-20T11:00:00Z"), hr = [], st = [];
+  const add = (from, n) => { for (let i = 0; i <= n; i++) { hr.push(100); st.push(new Date(from + i * 10000).toISOString()); } };
+  add(t0, 6 * 8); add(t0 + 12 * 60000, 6 * 10); hr.push(70); st.push(new Date(t0 + 40 * 60000).toISOString());   // 8 Min., 4 Min. Pause, 10 Min.
+  const text = JSON.stringify({ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") });
+  const out = processUpload(text, null, { marks: [{ id: "1".repeat(16), kind: "Core-Training", end: new Date(t0 + 8.5 * 60000).toISOString() }, { id: "2".repeat(16), kind: "Core-Training", end: new Date(t0 + 23 * 60000).toISOString() }] });
+  const w = out.workouts.filter(x => x.id.startsWith("w_"));
+  assert.equal(w.length, 1); assert.ok(Math.abs(w[0].min - 18) < 0.5, "8 + 10 Min.: " + w[0].min);
+  assert.equal(w[0].start, new Date(t0).toISOString()); assert.deepEqual(out.removed, ["w_" + "2".repeat(16)]);
+});
