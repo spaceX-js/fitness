@@ -8,7 +8,7 @@ import { METRICS } from "../public/health.js";
 import { cleanGoals } from "../public/goals.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.6.2";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.6.3";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -205,6 +205,8 @@ async function api(request, env, settings, url, session) {
         km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
         speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)
         .bind(x.id, x.date, String(x.start || "").slice(0, 30), String(x.end || "").slice(0, 30), String(x.kind || "Training").slice(0, 60), x.run ? 1 : 0, f(x.min), f(x.km), f(x.kcal), f(x.hr_avg), f(x.hr_max), f(x.speed), f(x.power), f(x.stride), f(x.gct), String(x.source || "").slice(0, 60), now));
+    for (const id of Array.isArray(b.removed) ? b.removed.slice(0, 50) : []) if (typeof id === "string" && /^w_[a-f0-9]{16}$/.test(id))
+      ops.push(env.DB.prepare("DELETE FROM workouts WHERE id = ?").bind(id), env.DB.prepare("DELETE FROM workout_marks WHERE id = ?").bind(id.slice(2)));
     if (b.batch) ops.push(env.DB.prepare("DELETE FROM health_raw WHERE batch = ?").bind(b.batch));
     for (let k = 0; k < ops.length; k += 80) if (ops.length) await env.DB.batch(ops.slice(k, k + 80));
     const left = (await env.DB.prepare("SELECT COUNT(*) AS n FROM health_raw").first()).n;

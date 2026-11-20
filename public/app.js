@@ -42,7 +42,7 @@ async function processHealthUploads() {
     S = await api("/api/state");
     if (marksOpen().length) {   // Watch-Training ohne neue Messungen: vorläufig mit geschätzter Dauer eintragen
       const out = processUpload("", null, markOpts());
-      await api("/api/health/apply", { batch: null, daily: [], workouts: out.workouts });
+      await api("/api/health/apply", { batch: null, daily: [], workouts: out.workouts, removed: out.removed });
       S = await api("/api/state");
     }
   } catch (e) { console.warn("Health-Auswertung:", e.message); }
@@ -1026,7 +1026,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.6.2</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.6.3</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;

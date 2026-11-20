@@ -330,8 +330,8 @@ export function aggregate(items0, opts = {}) {
       speed: r(avgOf("run_speed", w)), power: r(avgOf("run_power", w)), stride: r(avgOf("run_stride", w)), gct: r(avgOf("run_gct", w)), source: w.src.slice(0, 60) });
   }
   // Trainings von der Apple-Watch-Automation („Training beendet“): Beginn aus dem dichten Puls während des Trainings
-  const hrAll = (samples.hr || []).slice().sort((a, b) => a.s - b.s);
-  for (const m of opts.marks || []) {
+  const hrAll = (samples.hr || []).slice().sort((a, b) => a.s - b.s), removed = [], fromMarks = [];
+  for (const m of [...(opts.marks || [])].sort((a, b) => a.end < b.end ? -1 : 1)) {
     const end = Date.parse(m.end), id = "w_" + m.id;
     if (!Number.isFinite(end) || seen.has(id)) continue;
     let j = -1;
@@ -343,7 +343,17 @@ export function aggregate(items0, opts = {}) {
       while (k > 0 && hrAll[k].s - hrAll[k - 1].s <= 120000 && end - hrAll[k - 1].s <= 3 * 3600000) k--;
       if (endT - hrAll[k].s >= 300000) start = hrAll[k].s;
     }
-    if (start == null) { if ((opts.known || []).includes(id)) continue; start = end - (/core|mobil|yoga|dehn|flex/i.test(m.kind) ? 15 : 45) * 60000; }
+    if (start == null) {
+      // Puls nach dem Ende vorhanden, aber kein Trainingsblock: abgebrochenes/verworfenes Training (Watch meldet trotzdem „beendet“)
+      if (hrAll.length && hrAll[hrAll.length - 1].s >= end) { removed.push(id); continue; }
+      if ((opts.known || []).includes(id)) continue;
+      start = end - (/core|mobil|yoga|dehn|flex/i.test(m.kind) ? 15 : 45) * 60000;
+    } else {
+      // Doppelte Meldung für denselben Trainingsblock: nur einmal speichern
+      const dup = fromMarks.find(x => x.s < endT && start < x.e);
+      if (dup) { removed.push(id); continue; }
+      fromMarks.push({ s: start, e: endT });
+    }
     seen.add(id);
     const w = { s: start, e: endT };
     const hr = inWin("hr", w).map(x => num("hr", x)).filter(Number.isFinite);
@@ -353,7 +363,7 @@ export function aggregate(items0, opts = {}) {
       hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null,
       speed: null, power: null, stride: null, gct: null, source: "Apple Watch" });
   }
-  return { daily, workouts, summary };
+  return { daily, workouts, summary, removed };
 }
 
 /* ---------- Für die Anzeige ---------- */
@@ -396,8 +406,8 @@ export function probeOf(list) {
 // Ganze Auswertung einer Übertragung: Ergebnis für /api/health/apply
 export function processUpload(text, receivedAt, opts = {}) {
   const list = itemsFromText(text);
-  const { daily, workouts, summary } = aggregate(list, opts);
-  return { daily, workouts, summary: { received: receivedAt || null, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
+  const { daily, workouts, summary, removed } = aggregate(list, opts);
+  return { daily, workouts, removed, summary: { received: receivedAt || null, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
     unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
     sample: list.length ? "" : String(text || "").slice(0, 300), probe: probeOf(list) } };
 }

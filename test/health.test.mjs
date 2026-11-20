@@ -120,3 +120,19 @@ test("Schlaf über Mitternacht gehört zur Nacht, in der er endet", async () => 
   assert.equal(v["2026-11-20"], 89 + 60 + 316 + 30, "1:29 + 1:00 + 5:16 + 0:30 Mittagsschlaf");
   assert.equal(v["2026-11-19"], undefined, "frühester (unvollständiger) Tag fällt weg");
 });
+
+test("Watch: abgebrochenes und doppelt gemeldetes Training wird verworfen", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const t0 = Date.parse("2026-11-20T11:40:00Z"), hr = [], st = [];
+  for (let i = 0; i < 6; i++) { hr.push(70); st.push(new Date(t0 - 60 * 60000 + i * 8 * 60000).toISOString()); }   // vorher locker verteilt
+  for (let i = 0; i <= 12 * 6; i++) { hr.push(100); st.push(new Date(t0 + i * 10000).toISOString()); }            // 12 Min. Training
+  hr.push(72); st.push(new Date(t0 + 30 * 60000).toISOString());
+  const text = JSON.stringify({ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") });
+  const marks = [{ id: "a".repeat(16), kind: "Core-Training", end: new Date(t0 - 2 * 60000).toISOString() },
+    { id: "b".repeat(16), kind: "Core-Training", end: new Date(t0 + 15 * 60000).toISOString() },
+    { id: "c".repeat(16), kind: "Core-Training", end: new Date(t0 + 16 * 60000).toISOString() }];
+  const out = processUpload(text, null, { marks });
+  const w = out.workouts.filter(x => x.id.startsWith("w_"));
+  assert.equal(w.length, 1); assert.equal(w[0].id, "w_" + "b".repeat(16)); assert.ok(Math.abs(w[0].min - 12) < 0.5);
+  assert.deepEqual(out.removed.sort(), ["w_" + "a".repeat(16), "w_" + "c".repeat(16)]);
+});
