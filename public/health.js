@@ -58,7 +58,7 @@ const NAMES = {
   rhr: ["Ruhepuls", "Ruheherzfrequenz", "Resting Heart Rate"],
   hrv: ["Herzfrequenzvariabilität", "Herzfrequenz-Variabilität", "HRV", "Heart Rate Variability"],
   vo2: ["VO2 Max", "VO₂ Max", "Cardiofitness", "Cardio-Fitness", "VO2 max", "VO2max", "VO₂max", "Cardio Fitness"],
-  hr_recovery: ["Heart Rate Recovery One Minute", "Cardio Recovery", "Cardioerholung", "Herzfrequenz-Erholung", "Herzfrequenzerholung", "Cardio-Erholung", "Cardio Recovery", "Heart Rate Recovery"],
+  hr_recovery: ["Heart Rate Recovery, 1 min", "Heart Rate Recovery 1 min", "Heart Rate Recovery One Minute", "Cardio Recovery", "Cardioerholung", "Herzfrequenz-Erholung", "Herzfrequenzerholung", "Cardio-Erholung", "Cardio Recovery", "Heart Rate Recovery"],
   walk_hr: ["Walking Heart Rate Average", "∅-Herzfrequenz (Gehen)", "Ø-Herzfrequenz (Gehen)", "Herzfrequenz (Gehen)", "Gehpuls-Durchschnitt", "Gehpuls", "Durchschnittliche Herzfrequenz beim Gehen", "Walking Heart Rate Average", "Walking Heart Rate"],
   spo2: ["Blood Oxygen Saturation", "Blutsauerstoff", "Sauerstoffsättigung", "Blood Oxygen", "Oxygen Saturation"],
   bp_sys: ["Blood Pressure Systolic", "Blutdruck (systolisch)", "Systolischer Blutdruck", "Blutdruck systolisch", "Blood Pressure Systolic", "Systolic Blood Pressure"],
