@@ -45,6 +45,7 @@ if (!(await page.textContent("body")).includes("Notfall-Codes")) fail("Einrichtu
 await shot("03-notfallcodes");
 await page.click("a.btn");
 await page.waitForSelector(".hero");
+await page.click("#heroToggle"); await page.waitForSelector(".hero.open");
 
 // Beispieldaten: Plan seit 2 Wochen, einige Einheiten erledigt
 await page.evaluate(async () => {
@@ -165,8 +166,11 @@ await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='pace']"); await page.fill("#gtarget", "5:30"); await page.click("#gsave"); await page.waitForTimeout(300);
 await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='exercise']"); await page.fill("#gtarget", "12"); await page.click("#gsave"); await page.waitForTimeout(300);
-await page.goto(base + "/#/heute"); await page.waitForSelector(".goal");
-if ((await page.$$(".goal")).length !== 3) fail("Zielkarten fehlen");
+await page.goto(base + "/#/heute"); await page.waitForSelector(".gitem");
+if ((await page.$$(".gitem")).length !== 3) fail("Zielkarten fehlen");
+await page.click("#heroToggle"); await page.waitForSelector(".hero:not(.open)");
+await shot("26a-start-kompakt");
+await page.click("[data-gopen]"); await page.waitForSelector(".gbody");
 await shot("26-ziele-heute", true);
 await shot("24-heute-health", true);
 

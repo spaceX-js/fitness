@@ -11,7 +11,8 @@ const MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "A
 const KIND_LABEL = { strength: "Kraft", run: "Laufen", recovery: "Erholung", rest: "Ruhetag" };
 let S = null;                 // Daten vom Server
 let stops = [];               // laufende Animationen
-let ui = { planWeek: null, open: null };
+let ui = { planWeek: null, open: null, goalOpen: {} };
+try { ui.heroOpen = localStorage.getItem("heroOpen") === "1"; } catch (e) { ui.heroOpen = false; }
 
 /* ---------- Server ---------- */
 async function api(path, body) {
@@ -140,31 +141,33 @@ function viewToday() {
     weekHtml += `<button data-day="${d}" class="${d === day ? "sel" : ""} ${d === today ? "today" : ""} ${src !== i ? "moved" : ""}" aria-pressed="${d === day}" aria-label="${DAY_NAMES[i]}${d === today ? " (heute)" : ""}">
       <span class="lbl">${d === today ? "Heute" : DAY_NAMES[i].slice(0, 2)}</span><span class="ic ${cls}">${cls === "done" ? "✓" : cls === "skip" ? "–" : icon(k)}</span>${src !== i ? `<span class="mv">↔</span>` : ""}</button>`;
   }
+  const heroOpen = ui.heroOpen;
   $app.innerHTML = `
-    <p class="mute small" style="margin:0">${esc(longDate(today))}</p>
-    <h1>${week == null ? "Plan startet am " + fmtDate(S.start) : week > P.weeks ? "Plan geschafft 🎉" : "Woche " + week + " von " + P.weeks}</h1>
-    <p class="mute small" style="margin:0 0 14px">${esc(P.name)} · Version ${S.plan.version}${week && week <= P.weeks ? " · " + esc(focusFor(P, week).text) : ""}</p>
-    ${chips.length ? `<div class="row wrap" style="margin-bottom:12px">${chips.join("")}</div>` : ""}
+    <div class="top"><div class="grow"><p class="mute small" style="margin:0">${esc(longDate(today))}</p>
+      <h1 class="h1s">${week == null ? "Plan startet am " + fmtDate(S.start) : week > P.weeks ? "Plan geschafft 🎉" : "Woche " + week + " von " + P.weeks}</h1></div>
+      <a class="mute small planref" href="#/plan">${esc(P.name)} · V${S.plan.version}</a></div>
+    ${chips.length ? `<div class="row wrap" style="margin-bottom:8px">${chips.join("")}</div>` : ""}
     ${healthLine()}
-    <div class="weekstrip" style="margin-bottom:12px">${weekHtml}</div>
-    <div class="hero ${heroKind}">
-      <div class="row"><div class="k grow">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}${s.movedFrom != null ? " · getauscht mit " + esc(DAY_NAMES[s.movedFrom]) : ""}</div>
-        ${isToday ? "" : `<button class="pill" id="toToday">Zu heute</button>`}</div>
-      <h2>${esc(s.title)}</h2>
-      <p>${esc(sub)}</p>
-      ${shortPreview(s)}
+    ${goalCards(today)}
+    <div class="weekstrip" style="margin-bottom:10px">${weekHtml}</div>
+    <div class="hero ${heroKind} ${heroOpen ? "open" : ""}">
+      <button class="herohead" id="heroToggle" aria-expanded="${heroOpen}">
+        <div class="grow"><div class="k">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}${s.movedFrom != null ? " · getauscht mit " + esc(DAY_NAMES[s.movedFrom]) : ""}</div>
+          <h2>${esc(s.title)}</h2><p>${esc(sub)}</p></div><span class="chev">${heroOpen ? "▴" : "▾"}</span></button>
+      ${heroOpen ? shortPreview(s) : ""}
       <div class="row wrap">${doneTxt ? `<span class="done">${doneTxt}</span>` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
       ${log && log.status === "skipped" ? `<button class="btn swap" id="unskipDay">Doch trainieren</button>` : ""}
-      ${!log && s.kind !== "rest" ? `<button class="btn swap" id="skipDayHome">Auslassen</button>` : ""}
-      ${!log ? `<button class="btn swap" id="swapDay">Tag tauschen</button>` : ""}</div>
+      ${heroOpen && !log && s.kind !== "rest" ? `<button class="btn swap" id="skipDayHome">Auslassen</button>` : ""}
+      ${heroOpen && !log ? `<button class="btn swap" id="swapDay">Tag tauschen</button>` : ""}
+      ${!isToday ? `<button class="btn swap" id="toToday">Zu heute</button>` : ""}</div>
     </div>
-    ${watchCards(day, s, log)}
-    ${goalCards(today)}
     ${isToday ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}
     ${sugs.length ? `<h2>Vorschläge für dich</h2>` + sugs.map(sugCard).join("") : ""}
+    ${(() => { const wc = watchCards(day, s, log); return wc ? `<h2>Trainings</h2>` + wc : ""; })()}
     <a class="card row" href="#/tag/${today}/mob" style="text-decoration:none;color:inherit">
       <span class="dot recovery"></span><div class="grow"><b>Morgenroutine Mobility</b><div class="mute small">optional · 10–15 Min.</div></div>
       ${mob && mob.status === "done" ? `<span class="ok">✓</span>` : `<span class="mute">›</span>`}</a>`;
+  $app.querySelector("#heroToggle").addEventListener("click", () => { ui.heroOpen = !ui.heroOpen; try { localStorage.setItem("heroOpen", ui.heroOpen ? "1" : ""); } catch (e) {} render(); });
   $app.querySelectorAll("[data-day]").forEach(b => b.addEventListener("click", () => { ui.selDay = b.dataset.day; render(); }));
   const tt = $app.querySelector("#toToday"); if (tt) tt.addEventListener("click", () => { ui.selDay = today; render(); });
   const sw = $app.querySelector("#swapDay"); if (sw) sw.addEventListener("click", () => swapSheet(day, mon));
@@ -675,17 +678,17 @@ function viewPlan() {
 function goalCards(today) {
   const G = S.goals || [];
   if (!G.length) return "";
-  return `<h2>Deine Ziele</h2>` + G.map(g => {
-    const e = evaluateGoal(g, S, today);
+  return `<div class="card goals">${G.map(g => {
+    const e = evaluateGoal(g, S, today), open = !!ui.goalOpen[g.id];
     const cls = { done: "good", ok: "good", slow: "warn", off: "warn", late: "warn", wait: "info" }[e.status];
     const badge = { done: "Erreicht", ok: "Im Plan", slow: "Zu langsam", off: "Gegenläufig", late: "Überfällig", wait: "Läuft" }[e.status];
-    return `<button class="card goal sug ${cls}" data-goal="${esc(g.id)}">
-      <div class="row"><b class="grow">${esc(e.title)}</b><span class="badge ${cls === "info" ? "" : cls}">${badge}</span></div>
-      <div class="row" style="margin-top:6px;align-items:flex-end"><div class="grow"><span class="gnow">${esc(fmtGoal(g, e.current))}</span> <span class="mute small">→ ${esc(fmtGoal(g, g.target))}${g.until ? " bis " + fmtDate(g.until) : ""}</span></div>${sparkline(e)}</div>
+    return `<div class="gitem ${cls}"><button class="ghead" data-gopen="${esc(g.id)}" aria-expanded="${open}">
+        <span class="gdot"></span><b class="grow">${esc(e.title)}</b><span class="gval">${esc(fmtGoal(g, e.current))} <span class="mute">→ ${esc(fmtGoal(g, g.target))}</span></span><span class="chev mute">${open ? "▴" : "▾"}</span></button>
       <div class="gbar"><span style="width:${Math.round(e.progress * 100)}%"></span></div>
-      <p class="small" style="margin:6px 0 0">${esc(e.text)}${e.start != null && e.current != null && e.status !== "done" ? ` <span class="mute">Start ${esc(fmtGoal(g, e.start))}</span>` : ""}</p>
-      ${e.warn ? `<p class="small" style="margin:6px 0 0;color:var(--warn)">${esc(e.warn)}</p>` : ""}</button>`;
-  }).join("");
+      ${open ? `<div class="gbody"><div class="row" style="align-items:flex-start"><p class="small grow" style="margin:0"><span class="badge ${cls === "info" ? "" : cls}">${badge}</span> ${esc(e.text)}${e.start != null && e.current != null && e.status !== "done" ? ` <span class="mute">Start ${esc(fmtGoal(g, e.start))}${g.until ? " · bis " + fmtDate(g.until) : ""}</span>` : ""}</p>${sparkline(e)}</div>
+        ${e.warn ? `<p class="small" style="margin:6px 0 0;color:var(--warn)">${esc(e.warn)}</p>` : ""}
+        <button class="btn sm alt" data-goal="${esc(g.id)}" style="margin-top:8px">Bearbeiten</button></div>` : ""}</div>`;
+  }).join("")}</div>`;
 }
 function sparkline(e) {
   const p = e.series.slice(-30); if (p.length < 2) return "";
@@ -694,6 +697,7 @@ function sparkline(e) {
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><line x1="0" x2="${W}" y1="${y(e.goal.target).toFixed(1)}" y2="${y(e.goal.target).toFixed(1)}" class="tgt"/><path d="${p.map((q, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(q.v).toFixed(1)).join("")}"/></svg>`;
 }
 function bindGoals() {
+  $app.querySelectorAll("[data-gopen]").forEach(b => b.addEventListener("click", () => { const k = b.dataset.gopen; ui.goalOpen[k] = !ui.goalOpen[k]; render(); }));
   $app.querySelectorAll("[data-goal]").forEach(b => b.addEventListener("click", () => goalSheet((S.goals || []).find(g => g.id === b.dataset.goal))));
   const n = $app.querySelector("[data-goal-new]"); if (n) n.addEventListener("click", () => goalSheet(null));
 }
@@ -1022,7 +1026,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.6.0</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.6.1</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
