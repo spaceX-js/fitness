@@ -156,6 +156,18 @@ if (!(await page.textContent("body")).includes("5:30 h")) fail("Schlaf auf der S
 await page.reload(); await page.waitForSelector(".hero");
 await page.waitForFunction(() => document.body.textContent.includes("⌚ Krafttraining"), null, { timeout: 8000 }).catch(() => fail("Watch-Training fehlt auf der Startseite"));
 await shot("24-watch-training", true);
+await page.goto(base + "/#/plan"); await page.waitForSelector("[data-goal-new]");
+await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
+await page.click("[data-t='weight']"); await page.fill("#gtarget", "70");
+await shot("25-ziel-neu");
+await page.click("#gsave"); await page.waitForSelector("[data-goal]");
+await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
+await page.click("[data-t='pace']"); await page.fill("#gtarget", "5:30"); await page.click("#gsave"); await page.waitForTimeout(300);
+await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
+await page.click("[data-t='exercise']"); await page.fill("#gtarget", "12"); await page.click("#gsave"); await page.waitForTimeout(300);
+await page.goto(base + "/#/heute"); await page.waitForSelector(".goal");
+if ((await page.$$(".goal")).length !== 3) fail("Zielkarten fehlen");
+await shot("26-ziele-heute", true);
 await shot("24-heute-health", true);
 
 // v0.2: im Training überspringen und Übung hinzufügen

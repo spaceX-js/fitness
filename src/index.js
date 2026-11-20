@@ -5,9 +5,10 @@
 import { pbkdf2, sha256, newTotpSecret, checkTotp, otpauthUrl, randomHex, randomCode, safeEqual } from "./auth.js";
 import { DEFAULT_PLAN, validatePlan, diffPlans } from "../public/plan.js";
 import { METRICS } from "../public/health.js";
+import { cleanGoals } from "../public/goals.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.5.1";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.6.0";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -76,7 +77,7 @@ async function api(request, env, settings, url, session) {
         createdAt: p.created_at, appliedAt: p.applied_at, archivedAt: p.archived_at }));
     return json({
       start: plan.start, plan: planOut(plan), plans, health: await healthData(env, settings, 40),
-      overrides: parseObj(settings.overrides), status: parseObj(settings.status), decisions: parseObj(settings.decisions), planner: parseObj(settings.planner),
+      overrides: parseObj(settings.overrides), status: parseObj(settings.status), decisions: parseObj(settings.decisions), planner: parseObj(settings.planner), goals: parseArr(settings.goals),
       logs: results.map(r => ({ id: r.id, date: r.date, kind: r.kind, status: r.status, data: parseObj(r.data), updatedAt: r.updated_at })),
       sessions: Number((await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE expires_at > ?").bind(new Date().toISOString()).first()).n)
     });
@@ -173,6 +174,7 @@ async function api(request, env, settings, url, session) {
       if (s.length > 30000) return json({ error: "Zu viele Daten." }, 400);
       ops.push(setSetting(env, k, s));
     }
+    if ("goals" in b) ops.push(setSetting(env, "goals", JSON.stringify(cleanGoals(b.goals))));
     if (!ops.length) return json({ error: "Nichts zu speichern." }, 400);
     await env.DB.batch(ops);
     return json({ ok: true });
@@ -228,7 +230,7 @@ async function api(request, env, settings, url, session) {
     const plans = (await env.DB.prepare("SELECT * FROM plans WHERE status <> 'discarded' ORDER BY id").all()).results.map(planOut);
     const health = { daily: (await env.DB.prepare("SELECT date, metric, value FROM health_daily ORDER BY date").all()).results,
       workouts: (await env.DB.prepare("SELECT * FROM workouts ORDER BY start").all()).results };
-    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, plans, health, overrides: parseObj(settings.overrides), status: parseObj(settings.status),
+    const out = { exportedAt: new Date().toISOString(), start: settings.plan_start || null, plans, health, overrides: parseObj(settings.overrides), status: parseObj(settings.status), goals: parseArr(settings.goals),
       logs: results.map(r => ({ ...r, data: parseObj(r.data) })) };
     return new Response(JSON.stringify(out, null, 1), { headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="fitness-export-${out.exportedAt.slice(0, 10)}.json"`, "Cache-Control": "no-store", ...SEC } });
   }
@@ -319,8 +321,10 @@ async function healthData(env, settings, days) {
   const daily = (await env.DB.prepare("SELECT date, metric, value FROM health_daily WHERE date >= ? ORDER BY date").bind(since).all()).results;
   const workouts = (await env.DB.prepare("SELECT id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source FROM workouts WHERE date >= ? ORDER BY start DESC").bind(since).all()).results;
   const pending = (await env.DB.prepare("SELECT COUNT(DISTINCT batch) AS n FROM health_raw").first()).n;
+  const since2 = new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10);   // Körperwerte länger – für Ziele
+  const recent = (await env.DB.prepare("SELECT date, metric, value FROM health_daily WHERE date >= ? AND date < ? AND metric IN ('weight', 'bodyfat', 'lean', 'vo2', 'rhr') ORDER BY date").bind(since2, since).all()).results;
   const marks = (await env.DB.prepare("SELECT id, kind, end_at AS end FROM workout_marks WHERE end_at >= ? ORDER BY end_at DESC LIMIT 200").bind(since).all()).results;
-  return { daily, workouts, marks, pending, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
+  return { daily, recent, workouts, marks, pending, hasKey: !!settings.import_hash, keyCreated: settings.import_created || null, last: parseObj(settings.import_last) };
 }
 
 /* ---------- Pläne ---------- */

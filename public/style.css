@@ -190,3 +190,10 @@ code.sel{-webkit-user-select:all;user-select:all;word-break:break-all;background
 code.key{display:block;padding:10px;font-size:14px}
 details summary{cursor:pointer;color:var(--acc)}
 @media (prefers-color-scheme:dark){.htile{border:1px solid var(--line)}.seg{border:1px solid var(--line)}}
+
+/* Ziele */
+button.card.goal{display:block;width:100%;text-align:left;font:inherit;color:inherit;border-top:0;border-right:0;border-bottom:0;cursor:pointer}
+.gnow{font-size:22px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.gbar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;margin-top:8px}.gbar span{display:block;height:100%;border-radius:99px;background:var(--good)}
+.sug.warn .gbar span{background:var(--warn)}.sug.info .gbar span{background:var(--acc)}
+svg.spark{width:96px;height:30px;flex:none}svg.spark path{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}svg.spark .tgt{stroke:var(--good);stroke-width:1;stroke-dasharray:3 3}

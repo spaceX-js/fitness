@@ -238,6 +238,9 @@ test("Health-Import: nur mit Schlüssel speichern, im Browser auswerten, Ergebni
   assert.equal((await post(env, cookie, "/api/health/apply", { batch: null, daily: [], workouts: est.workouts })).status, 200);
   st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
   assert.equal(st.health.workouts.length, 1);
+  assert.equal((await post(env, cookie, "/api/settings", { goals: [{ type: "weight", target: 70, start: 73 }, { type: "evil", target: 1 }] })).status, 200);
+  st = await (await call(env, "/api/state", { headers: { Cookie: cookie } })).json();
+  assert.equal(st.goals.length, 1); assert.ok(Array.isArray(st.health.recent));
   await post(env, cookie, "/api/health/revoke", {});
   assert.equal((await imp("Bearer " + k.key, body)).status, 401);
   await post(env, cookie, "/api/health/delete", {});

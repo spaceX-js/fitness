@@ -3,6 +3,7 @@ import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf
 import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK, readiness } from "./coach.js";
 import { METRICS, GROUPS as HGROUPS, SHORTCUT_TYPES, fmtVal, avgRange, processUpload } from "./health.js";
 import { mount, still } from "./anim.js";
+import { GOAL_TYPES, GOAL_KEYS, evaluateGoal, fmtGoal, parseGoalValue, fmtPace, unitOf, titleOf, seriesOf, currentOf } from "./goals.js";
 
 const $app = document.getElementById("app"), $rest = document.getElementById("rest");
 const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -158,6 +159,7 @@ function viewToday() {
       ${!log ? `<button class="btn swap" id="swapDay">Tag tauschen</button>` : ""}</div>
     </div>
     ${watchCards(day, s, log)}
+    ${goalCards(today)}
     ${isToday ? s.notes.map(n => `<div class="note">${esc(n)}</div>`).join("") : ""}
     ${sugs.length ? `<h2>Vorschläge für dich</h2>` + sugs.map(sugCard).join("") : ""}
     <a class="card row" href="#/tag/${today}/mob" style="text-decoration:none;color:inherit">
@@ -186,6 +188,7 @@ function viewToday() {
     try { await api("/api/log/delete", { id: day + "-main" }); S.logs = S.logs.filter(l => l.id !== day + "-main"); toast("Wieder offen"); render(); } catch (e) { toast(e.message); }
   });
   bindSuggestions(sugs);
+  bindGoals();
   $app.querySelectorAll("[data-watch]").forEach(b => b.addEventListener("click", async () => {
     const w = (S.health.workouts || []).find(x => x.id === b.dataset.watch); if (!w) return;
     const mob = b.dataset.as === "mob";
@@ -655,6 +658,9 @@ function viewPlan() {
       ${P.goal ? `<p class="small" style="margin:8px 0 0">${esc(P.goal)}</p>` : ""}
       <div class="row wrap" style="margin-top:12px"><a class="btn sm" href="#/plan/bearbeiten">${editing ? "Bearbeitung fortsetzen" : "Bearbeiten"}</a>
       <a class="btn sm alt" href="#/plan/versionen">Verlauf (${famVersions().length})</a><a class="btn sm alt" href="#/plan/planer">Neuer Plan</a></div></div>
+    <div class="card"><div class="row"><h3 class="grow" style="margin:0">Ziele</h3><button class="btn sm" data-goal-new>+ Ziel</button></div>
+      ${(S.goals || []).length ? `<div class="list" style="margin-top:8px">${S.goals.map(g => `<button class="pickday" data-goal="${esc(g.id)}"><div class="grow"><b>${esc(titleOf(g))}</b> <span class="mute small">→ ${esc(fmtGoal(g, g.target))}${g.until ? " bis " + fmtDate(g.until) : ""}</span></div><span class="mute">›</span></button>`).join("")}</div>`
+        : `<p class="mute small" style="margin:6px 0 0">Zum Beispiel Gewicht, Körperfett, Muskelmasse, VO₂max, Lauf-Pace oder ein Kraftziel. Die Ziele erscheinen mit Verlauf auf der Startseite.</p>`}</div>
     ${drafts.map(d => `<a class="card sug good" href="#/plan/ansehen/${d.id}" style="display:block;text-decoration:none;color:inherit"><span class="badge good">Vorschlag</span>
       <h3 style="margin-top:8px">${esc(d.name)}</h3>${d.note ? `<p>${esc(d.note)}</p>` : ""}<span class="btn sm" style="margin-top:4px">Ansehen</span></a>`).join("")}
     ${waiting ? `<div class="note" style="background:var(--acc-soft);color:var(--acc)">Deine Planer-Angaben vom ${fmtDate(pl.at.slice(0, 10))} sind gespeichert. Sag Claude im Chat „Planer ist ausgefüllt“ – dann kommen hier Vorschläge für den neuen Plan.</div>` : ""}
@@ -662,6 +668,75 @@ function viewPlan() {
     <div class="card list">${days}</div>
     ${archived.length ? `<a class="card row" href="#/plan/archiv" style="text-decoration:none;color:inherit"><div class="grow"><b>Archiv</b><div class="mute small">${archived.length} ${archived.length === 1 ? "früherer Plan" : "frühere Pläne"}</div></div><span class="mute">›</span></a>` : ""}`;
   $app.querySelectorAll("[data-w]").forEach(b => b.addEventListener("click", () => { ui.planWeek = Number(b.dataset.w); render(); }));
+  bindGoals();
+}
+
+/* ---------- Ziele ---------- */
+function goalCards(today) {
+  const G = S.goals || [];
+  if (!G.length) return "";
+  return `<h2>Deine Ziele</h2>` + G.map(g => {
+    const e = evaluateGoal(g, S, today);
+    const cls = { done: "good", ok: "good", slow: "warn", off: "warn", late: "warn", wait: "info" }[e.status];
+    const badge = { done: "Erreicht", ok: "Im Plan", slow: "Zu langsam", off: "Gegenläufig", late: "Überfällig", wait: "Läuft" }[e.status];
+    return `<button class="card goal sug ${cls}" data-goal="${esc(g.id)}">
+      <div class="row"><b class="grow">${esc(e.title)}</b><span class="badge ${cls === "info" ? "" : cls}">${badge}</span></div>
+      <div class="row" style="margin-top:6px;align-items:flex-end"><div class="grow"><span class="gnow">${esc(fmtGoal(g, e.current))}</span> <span class="mute small">→ ${esc(fmtGoal(g, g.target))}${g.until ? " bis " + fmtDate(g.until) : ""}</span></div>${sparkline(e)}</div>
+      <div class="gbar"><span style="width:${Math.round(e.progress * 100)}%"></span></div>
+      <p class="small" style="margin:6px 0 0">${esc(e.text)}${e.start != null && e.current != null && e.status !== "done" ? ` <span class="mute">Start ${esc(fmtGoal(g, e.start))}</span>` : ""}</p>
+      ${e.warn ? `<p class="small" style="margin:6px 0 0;color:var(--warn)">${esc(e.warn)}</p>` : ""}</button>`;
+  }).join("");
+}
+function sparkline(e) {
+  const p = e.series.slice(-30); if (p.length < 2) return "";
+  const W = 96, H = 30, vs = p.map(x => x.v).concat([e.goal.target]), lo = Math.min(...vs), hi = Math.max(...vs) || 1, rg = hi - lo || 1;
+  const x = i => 2 + i * (W - 4) / (p.length - 1), y = v => 3 + (hi - v) / rg * (H - 6);
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><line x1="0" x2="${W}" y1="${y(e.goal.target).toFixed(1)}" y2="${y(e.goal.target).toFixed(1)}" class="tgt"/><path d="${p.map((q, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(q.v).toFixed(1)).join("")}"/></svg>`;
+}
+function bindGoals() {
+  $app.querySelectorAll("[data-goal]").forEach(b => b.addEventListener("click", () => goalSheet((S.goals || []).find(g => g.id === b.dataset.goal))));
+  const n = $app.querySelector("[data-goal-new]"); if (n) n.addEventListener("click", () => goalSheet(null));
+}
+function goalSheet(g0) {
+  const g = g0 ? { ...g0 } : { type: "weight", mode: "reps", ex: "pullup" };
+  const exIds = Object.keys(EXERCISES).sort((a, b) => EXERCISES[a].name.localeCompare(EXERCISES[b].name, "de"));
+  const bg = sheet(`<h2 style="margin-top:0">${g0 ? "Ziel bearbeiten" : "Neues Ziel"}</h2><div id="gs"></div>`);
+  const box = bg.querySelector("#gs");
+  const draw = () => {
+    const ser = seriesOf(g, S), cur = currentOf(g, ser), tmp = { ...g };
+    const val = v => v == null ? "" : g.type === "pace" ? fmtPace(v) : String(Math.round(v * 10) / 10).replace(".", ",");
+    box.innerHTML = `${g0 ? "" : `<label class="f" style="margin-top:0">Was willst du erreichen?</label><div class="row wrap">${GOAL_KEYS.map(k => `<span class="chip ${g.type === k ? "on" : ""}" data-t="${k}">${esc(GOAL_TYPES[k].label)}</span>`).join("")}</div>`}
+      ${g.type === "exercise" ? `<label class="f">Übung</label><select id="gex">${exIds.map(id => `<option value="${id}" ${g.ex === id ? "selected" : ""}>${esc(EXERCISES[id].name)}</option>`).join("")}</select>
+        <div class="row wrap" style="margin-top:8px">${[["reps", EXERCISES[g.ex] && EXERCISES[g.ex].type === "time" ? "Sekunden in einem Satz" : "Wiederholungen in einem Satz"], ["kg", "Gewicht (kg)"]].map(([k, l]) => `<span class="chip ${g.mode === k ? "on" : ""}" data-m="${k}">${l}</span>`).join("")}</div>` : ""}
+      <p class="small" style="margin:12px 0 0">Aktuell: <b>${esc(cur == null ? "noch kein Wert" : fmtGoal(tmp, cur))}</b>${cur == null && GOAL_TYPES[g.type].src === "health" ? ` <span class="mute">– kommt mit dem nächsten Fitness Sync${g.type === "lean" ? " (Typ „Magere Körpermasse“)" : g.type === "vo2" ? " (Typ „Cardiofitness“)" : ""}</span>` : ""}</p>
+      <div class="grid2" style="margin-top:4px">
+        <div><label class="f">Ziel${unitOf(g) ? " (" + esc(unitOf(g)) + ")" : ""}</label><input type="text" inputmode="${g.type === "pace" ? "text" : "decimal"}" id="gtarget" value="${esc(val(g.target))}" placeholder="${g.type === "pace" ? "z. B. 5:30" : ""}"></div>
+        <div><label class="f">Bis (optional)</label><input type="date" id="guntil" value="${esc(g.until || "")}" min="${todayIso()}"></div>
+      </div>
+      ${cur == null ? `<label class="f">Startwert (optional)</label><input type="text" inputmode="decimal" id="gstart" value="${esc(val(g.start))}" placeholder="aktueller Wert">` : ""}
+      <button class="btn full" id="gsave" style="margin-top:16px">Speichern</button>
+      ${g0 ? `<button class="btn ghost full danger" id="gdel" style="margin-top:6px">Ziel löschen</button>` : `<button class="btn ghost full" id="gno" style="margin-top:6px">Abbrechen</button>`}`;
+    box.querySelectorAll("[data-t]").forEach(c => c.addEventListener("click", () => { g.type = c.dataset.t; g.target = undefined; draw(); }));
+    box.querySelectorAll("[data-m]").forEach(c => c.addEventListener("click", () => { g.mode = c.dataset.m; draw(); }));
+    const ex = box.querySelector("#gex"); if (ex) ex.addEventListener("change", () => { g.ex = ex.value; draw(); });
+    const no = box.querySelector("#gno"); if (no) no.addEventListener("click", () => bg.remove());
+    const del = box.querySelector("#gdel");
+    if (del) del.addEventListener("click", async () => { if (!window.confirm("Ziel löschen?")) return; try { await saveSettings({ goals: S.goals.filter(x => x.id !== g0.id) }); bg.remove(); render(); } catch (e) { toast(e.message); } });
+    box.querySelector("#gsave").addEventListener("click", async () => {
+      const target = parseGoalValue(g.type, box.querySelector("#gtarget").value);
+      if (!Number.isFinite(target)) return toast(g.type === "pace" ? "Pace bitte als z. B. 5:30 eingeben" : "Bitte einen Zielwert eingeben");
+      const st = box.querySelector("#gstart"), startIn = st && st.value.trim() ? parseGoalValue(g.type, st.value) : null;
+      const start = g0 && Number.isFinite(g0.start) && g0.type === g.type && g0.ex === g.ex && g0.mode === g.mode ? g0.start : cur != null ? Math.round(cur * 100) / 100 : Number.isFinite(startIn) ? startIn : null;
+      const item = { id: g0 ? g0.id : Math.random().toString(36).slice(2, 10), type: g.type, target, start, created: g0 && g0.created || todayIso(), until: box.querySelector("#guntil").value || null,
+        ...(g.type === "exercise" ? { ex: g.ex, mode: g.mode } : {}) };
+      const list = (S.goals || []).filter(x => !g0 || x.id !== g0.id);
+      if (!g0 && list.length >= 10) return toast("Höchstens 10 Ziele");
+      const idx = g0 ? S.goals.findIndex(x => x.id === g0.id) : -1;
+      if (idx >= 0) list.splice(idx, 0, item); else list.push(item);
+      try { await saveSettings({ goals: list }); bg.remove(); toast("Ziel gespeichert"); render(); } catch (e) { toast(e.message); }
+    });
+  };
+  draw();
 }
 
 // Bearbeiten: Änderungen sammeln, dann als neue Version speichern
@@ -947,7 +1022,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.5.1</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.6.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;

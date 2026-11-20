@@ -38,7 +38,8 @@ export const METRICS = {
   run_gct:      { label: "Bodenkontaktzeit", unit: "ms", dec: 0, agg: "avg", group: "Laufen", better: "low" },
   run_vo:       { label: "Vertikale Bewegung", unit: "cm", dec: 1, agg: "avg", group: "Laufen", better: "low" },
   weight:       { label: "Gewicht", unit: "kg", dec: 1, agg: "avg", group: "Körper" },
-  bodyfat:      { label: "Körperfett", unit: "%", dec: 1, agg: "avg", group: "Körper", better: "low" }
+  bodyfat:      { label: "Körperfett", unit: "%", dec: 1, agg: "avg", group: "Körper", better: "low" },
+  lean:         { label: "Fettfreie Masse", unit: "kg", dec: 1, agg: "avg", group: "Körper", better: "high" }
 };
 export const GROUPS = ["Herz", "Schlaf", "Aktivität", "Laufen", "Körper"];
 
@@ -70,7 +71,8 @@ const NAMES = {
   run_gct: ["Bodenkontaktzeit", "Bodenkontaktzeit beim Laufen", "Running Ground Contact Time"],
   run_vo: ["Running Vertical Oscillation", "Vertical Oscillation", "Vertikale Oszillation", "Vertikale Bewegung beim Laufen", "Vertikale Bewegung", "Running Vertical Oscillation"],
   weight: ["Gewicht", "Körpergewicht", "Weight", "Body Mass"],
-  bodyfat: ["Körperfettanteil", "Körperfett", "Body Fat Percentage", "Body Fat"]
+  bodyfat: ["Körperfettanteil", "Körperfett", "Body Fat Percentage", "Body Fat"],
+  lean: ["Lean Body Mass", "Magere Körpermasse", "Fettfreie Körpermasse", "Fettfreie Masse", "Muskelmasse"]
 };
 const norm = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/₂/g, "2").replace(/[^a-z0-9]/g, "");
 const NAME_MAP = new Map();
@@ -82,7 +84,7 @@ export function typeKey(name) { return NAME_MAP.get(norm(name)) || null; }
 export const SHORTCUT_TYPES = ["Schritte", "Strecke (Gehen und Laufen)", "Aktivitätsenergie", "Trainingsminuten", "Stehminuten", "Treppensteigen",
   "Ruheherzfrequenz", "Herzfrequenz", "Herzfrequenzvariabilität", "Cardiofitness", "Cardioerholung", "Blutsauerstoff",
   "Systolischer Blutdruck", "Diastolischer Blutdruck", "Schlaf", "Atemfrequenz", "Temperatur am Handgelenk",
-  "Laufgeschwindigkeit", "Laufleistung", "Schrittlänge beim Laufen", "Bodenkontaktzeit", "Vertikale Oszillation", "Gewicht", "Körperfettanteil"];
+  "Laufgeschwindigkeit", "Laufleistung", "Schrittlänge beim Laufen", "Bodenkontaktzeit", "Vertikale Oszillation", "Gewicht", "Körperfettanteil", "Magere Körpermasse"];
 
 /* ---------- Werte lesen (Kurzbefehle liefern Listen oder Text mit Zeilenumbrüchen) ---------- */
 export function asList(v) {
@@ -162,7 +164,7 @@ function convert(key, n, unit) {
   const u = String(unit || "").toLowerCase().replace(/\s/g, "");
   if (key === "dist") return u === "m" ? n / 1000 : u === "mi" ? n * 1.609344 : u === "yd" ? n * 0.0009144 : n;
   if (key === "active_kcal") return u === "kj" ? n / 4.184 : n;
-  if (key === "weight") return u === "lb" || u === "lbs" ? n * 0.45359237 : u === "g" ? n / 1000 : n;
+  if (key === "weight" || key === "lean") return u === "lb" || u === "lbs" ? n * 0.45359237 : u === "g" ? n / 1000 : n;
   if (key === "spo2" || key === "bodyfat") return n <= 1 && u !== "%" ? n * 100 : n;
   if (key === "run_speed") return u === "m/s" || u === "ms" ? n * 3.6 : u === "mi/h" || u === "mph" ? n * 1.609344 : n;
   if (key === "run_stride") return u === "cm" ? n / 100 : n;
