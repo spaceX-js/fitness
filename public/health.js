@@ -351,7 +351,7 @@ export function aggregate(items0, opts = {}) {
     for (let jj = j; jj >= 0 && hrAll[jj].s >= end - 10 * 60000 && start == null; jj--) {
       const eT = Math.max(hrAll[jj].s, Math.min(end, hrAll[jj].e));
       let k = jj;
-      while (k > 0 && hrAll[k].s - hrAll[k - 1].s <= 120000 && end - hrAll[k - 1].s <= 3 * 3600000) k--;
+      while (k > 0 && hrAll[k].s - hrAll[k - 1].s <= 180000 && end - hrAll[k - 1].s <= 3 * 3600000) k--;
       if (eT - hrAll[k].s >= 300000) { start = hrAll[k].s; endT = eT; }
     }
     if (start == null) {
@@ -388,6 +388,10 @@ export function aggregate(items0, opts = {}) {
     workouts.push(wo);
     if (!est) fromMarks.push({ kind: m.kind, wo, parts: [{ s: start, e: endT }] });
   }
+  // Zur Fehlersuche: Pulsmessungen rund um jede Watch-Meldung (nur Uhrzeit und Wert)
+  const markProbe = (opts.marks || []).slice(0, 5).map(m => { const e = Date.parse(m.end); return { id: m.id, end: m.end,
+    hr: hrAll.filter(x => x.s >= e - 20 * 60000 && x.s <= e + 5 * 60000).slice(-200).map(x => [new Date(x.s).toISOString().slice(11, 19), num("hr", x)]) }; });
+  summary.markProbe = markProbe;
   return { daily, workouts, summary, removed };
 }
 
@@ -457,6 +461,6 @@ export function processUpload(text, receivedAt, opts = {}) {
   const list = itemsFromText(text);
   const { daily, workouts, summary, removed } = aggregate(list, opts);
   return { daily, workouts, removed, summary: { received: receivedAt || null, items: summary.slice(0, 60), days: daily.length, workouts: workouts.length,
-    unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
+    markProbe: summary.markProbe, unknown: summary.filter(s => !s.key).map(s => s.typ).slice(0, 20), empty: summary.filter(s => s.key && !s.count).map(s => s.typ).slice(0, 30),
     sample: list.length ? "" : String(text || "").slice(0, 300), probe: probeOf(list) } };
 }
