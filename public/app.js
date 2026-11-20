@@ -1026,7 +1026,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.6.1</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.6.2</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -1059,12 +1059,16 @@ function lastVal(metric) { const l = (S.health && S.health.daily || []).filter(r
 function fmtWhen(iso) { if (!iso) return "–"; const d = new Date(iso); return d.toLocaleDateString("de-DE", { day: "numeric", month: "numeric" }) + ", " + d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr"; }
 
 // Kurzzeile auf der Startseite: Schlaf, Ruhepuls, HRV
+// Ø der laufenden Woche: Schlaf inkl. letzter Nacht; Schritte und Energie nur abgeschlossene Tage (heute läuft noch) – montags der heutige Stand
 function healthLine() {
-  const today = todayIso(), out = [];
-  const sl = (S.health && S.health.daily || []).find(r => r.metric === "sleep_total" && r.date === today);
-  if (sl) out.push("😴 " + fmtVal("sleep_total", sl.value));
-  for (const m of ["rhr", "hrv"]) { const l = lastVal(m); if (l && l.date >= addDays(today, -1)) out.push((m === "rhr" ? "❤️ " : "〰️ HRV ") + fmtVal(m, l.value)); }
-  return out.length ? `<p class="small" style="margin:-6px 0 12px">${out.map(esc).join(" · ")}</p>` : "";
+  const today = todayIso(), mon = addDays(today, -dayIndex(today)), D = (S.health && S.health.daily) || [], out = [];
+  const until = today === mon ? today : addDays(today, -1);
+  const a = (m, to) => avgRange(D, m, mon, to);
+  const sl = a("sleep_total", today), st = a("steps", until), kc = a("active_kcal", until);
+  if (sl) out.push("😴 " + fmtVal("sleep_total", sl.v));
+  if (st) out.push("👟 " + Math.round(st.v).toLocaleString("de-DE"));
+  if (kc) out.push("🔥 " + Math.round(kc.v).toLocaleString("de-DE") + " kcal");
+  return out.length ? `<p class="small" style="margin:-4px 0 12px"><span class="mute">Ø Woche</span> ${out.map(esc).join(" · ")}</p>` : "";
 }
 
 // Lauf aus Apple Health für einen Tag

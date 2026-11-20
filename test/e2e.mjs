@@ -151,7 +151,7 @@ await page.click("[data-metric='rhr']"); await page.waitForSelector(".sheet svg.
 await shot("23-ruhepuls");
 await page.goto(base + "/#/heute"); await page.reload(); await page.waitForSelector(".hero");
 if (!(await page.textContent("body")).includes("Erholung")) fail("Erholungs-Hinweis fehlt");
-if (!(await page.textContent("body")).includes("5:30 h")) fail("Schlaf auf der Startseite falsch");
+if (!/Ø Woche 😴 \d+:\d\d h · 👟 [\d.]+ · 🔥 [\d.]+ kcal/.test(await page.textContent("body"))) fail("Wochenwerte auf der Startseite fehlen");
 { const r = await fetch(base + "/api/import", { method: "POST", headers: { Authorization: hkey, "Content-Type": "application/json" }, body: JSON.stringify({ training: "Krafttraining" }) });
   if (r.status !== 200) fail("Watch-Meldung fehlgeschlagen: " + r.status); }
 await page.reload(); await page.waitForSelector(".hero");

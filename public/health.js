@@ -286,7 +286,9 @@ export function aggregate(items0, opts = {}) {
 
   // Schlaf: Nacht = Tag des Aufwachens; überlappende Quellen (iPhone + Watch) nur einmal zählen
   if (samples.sleep) {
-    const nights = drop(byDay(samples.sleep, x => x.e));
+    // Schlaf zählt zur Nacht, in der er endet – wie Apple Health mit Grenze 18 Uhr: was nach 18 Uhr endet, gehört zum nächsten Tag
+    // (sonst landet z. B. 22:30–23:59 beim Vortag und fehlt in der Nacht)
+    const nights = drop(byDay(samples.sleep, x => x.e + 6 * 3600000));
     for (const [d, l] of nights) {
       const st = {}; for (const x of l) { const k = sleepStage(x.v); if (k) (st[k] = st[k] || []).push([x.s, x.e]); }
       const h = ms => ms / 3600000;

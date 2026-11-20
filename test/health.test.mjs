@@ -111,3 +111,12 @@ test("Watch-Training: Dauer aus dichtem Puls, sonst Schätzung", async () => {
   assert.equal(e.min, 15);
   assert.equal(processUpload("", null, { marks: [{ id: "x1", kind: "Core-Training", end: new Date(t0).toISOString() }], known: ["w_x1"] }).workouts.length, 0, "vorhandenes nicht mit Schätzung überschreiben");
 });
+
+test("Schlaf über Mitternacht gehört zur Nacht, in der er endet", async () => {
+  const { aggregate } = await import("../public/health.js");
+  const r = aggregate([{ typ: "Sleep", werte: "Kern\nKern\nTief\nKern\nKern", start: "18.11.2026, 23:00\n19.11.2026, 22:30\n20.11.2026, 00:00\n20.11.2026, 01:00\n20.11.2026, 13:00",
+    ende: "19.11.2026, 06:00\n19.11.2026, 23:59\n20.11.2026, 01:00\n20.11.2026, 06:16\n20.11.2026, 13:30" }]);
+  const v = Object.fromEntries(r.daily.filter(x => x.metric === "sleep_total").map(x => [x.date, Math.round(x.value * 60)]));
+  assert.equal(v["2026-11-20"], 89 + 60 + 316 + 30, "1:29 + 1:00 + 5:16 + 0:30 Mittagsschlaf");
+  assert.equal(v["2026-11-19"], undefined, "frühester (unvollständiger) Tag fällt weg");
+});
