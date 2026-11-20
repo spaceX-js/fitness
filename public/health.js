@@ -347,16 +347,20 @@ export function aggregate(items0, opts = {}) {
     let j = -1;
     for (let k = hrAll.length - 1; k >= 0; k--) if (hrAll[k].s <= end + 180000) { j = k; break; }
     let start = null, endT = end, est = false;
-    if (j >= 0 && end - hrAll[j].s < 300000) {
-      endT = Math.max(hrAll[j].s, Math.min(end, hrAll[j].e));
-      let k = j;
+    // Den dichten Pulsblock suchen, der bis kurz vor die Meldung reicht (einzelne Messungen danach überspringen)
+    for (let jj = j; jj >= 0 && hrAll[jj].s >= end - 10 * 60000 && start == null; jj--) {
+      const eT = Math.max(hrAll[jj].s, Math.min(end, hrAll[jj].e));
+      let k = jj;
       while (k > 0 && hrAll[k].s - hrAll[k - 1].s <= 120000 && end - hrAll[k - 1].s <= 3 * 3600000) k--;
-      if (endT - hrAll[k].s >= 300000) start = hrAll[k].s;
+      if (eT - hrAll[k].s >= 300000) { start = hrAll[k].s; endT = eT; }
     }
     if (start == null) {
       // Puls nach dem Ende vorhanden, aber kein Trainingsblock: abgebrochenes/verworfenes Training (Watch meldet trotzdem „beendet“)
+      // Ein schon richtig erkanntes Training wird dabei nie gelöscht – nur geschätzte oder neue
+      const known = (opts.known || []).find(k => (typeof k === "string" ? k : k.id) === id);
+      const knownReal = known && typeof known === "object" && !/geschätzt/.test(known.source || "");
+      if (knownReal || (known && typeof known === "string")) continue;
       if (hrAll.length && hrAll[hrAll.length - 1].s >= end) { removed.push(id); continue; }
-      if ((opts.known || []).includes(id)) continue;
       start = end - (/core|mobil|yoga|dehn|flex/i.test(m.kind) ? 15 : 45) * 60000; est = true;
     }
     const r = x => x == null ? null : Math.round(x * 100) / 100;
@@ -379,7 +383,7 @@ export function aggregate(items0, opts = {}) {
     }
     seen.add(id);
     const wo = { id, date: localDate(end), kind: String(m.kind).slice(0, 60), run: /lauf|run|jog/i.test(m.kind), km: null,
-      speed: null, power: null, stride: null, gct: null, source: "Apple Watch" };
+      speed: null, power: null, stride: null, gct: null, source: est ? "Apple Watch (geschätzt)" : "Apple Watch" };
     build(wo, [{ s: start, e: endT }]);
     workouts.push(wo);
     if (!est) fromMarks.push({ kind: m.kind, wo, parts: [{ s: start, e: endT }] });

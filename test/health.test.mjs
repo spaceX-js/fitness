@@ -163,3 +163,18 @@ test("Pulszonen, Belastung, Verlauf und Puls-Erholung je Training", async () => 
   assert.ok(w.curve.length >= 25 && w.curve[0][1] === 125 && w.curve[w.curve.length - 1][1] === 150);
   assert.equal(hrStats([{ s: 1, bpm: 100 }], [{ s: 0, e: 10 }]), null);
 });
+
+test("Watch: einzelne Messung nach dem Training stört nicht, erkanntes Training wird nie gelöscht", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const t0 = Date.parse("2026-11-20T11:40:00Z"), hr = [], st = [];
+  for (let i = 0; i <= 12 * 6; i++) { hr.push(100); st.push(new Date(t0 + i * 10000).toISOString()); }
+  hr.push(75); st.push(new Date(t0 + 17 * 60000).toISOString());   // 5 Min. nach Ende, 2 Min. nach der Meldung
+  const text = JSON.stringify({ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") });
+  const marks = [{ id: "f".repeat(16), kind: "Core-Training", end: new Date(t0 + 15 * 60000).toISOString() }];
+  const w = processUpload(text, null, { marks }).workouts.find(x => x.id === "w_" + "f".repeat(16));
+  assert.ok(w && Math.abs(w.min - 12) < 0.5 && w.source === "Apple Watch", JSON.stringify(w));
+  const noHr = JSON.stringify({ typ: "Heart Rate", werte: "70\n71", start: new Date(t0 - 3600000).toISOString() + "\n" + new Date(t0 + 3600000).toISOString() });
+  const out = processUpload(noHr, null, { marks, known: [{ id: "w_" + "f".repeat(16), source: "Apple Watch" }] });
+  assert.equal(out.removed.length, 0); assert.equal(out.workouts.filter(x => x.id.startsWith("w_")).length, 0);
+  assert.deepEqual(processUpload(noHr, null, { marks, known: [{ id: "w_" + "f".repeat(16), source: "Apple Watch (geschätzt)" }] }).removed, ["w_" + "f".repeat(16)]);
+});
