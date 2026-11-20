@@ -157,6 +157,15 @@ if (!/Ø Woche 😴 \d+:\d\d h · 👟 [\d.]+ · 🔥 [\d.]+ kcal/.test(await pa
 await page.reload(); await page.waitForSelector(".hero");
 await page.waitForFunction(() => document.body.textContent.includes("⌚ Krafttraining"), null, { timeout: 8000 }).catch(() => fail("Watch-Training fehlt auf der Startseite"));
 await shot("24-watch-training", true);
+await page.evaluate(async () => {
+  const d = new Date(), iso = d.toISOString().slice(0, 10), curve = Array.from({ length: 40 }, (_, i) => [i, Math.round(i < 8 ? 110 + i * 3 : i % 6 < 3 ? 160 : 132)]);
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  await fetch("/api/health/apply", { method: "POST", headers: { "Content-Type": "application/json", "X-Fit": "1" }, body: JSON.stringify({ batch: null, daily: [],
+    workouts: [{ id: "w_" + "e".repeat(16), date: today, start: new Date(Date.now() - 50 * 60000).toISOString(), end: new Date(Date.now() - 10 * 60000).toISOString(), kind: "Laufen (erkannt)", run: true,
+      min: 40, km: 6.6, kcal: 420, hr_avg: 142, hr_max: 168, zones: [420, 900, 600, 360, 120], load: 92, curve, hrr: 28 }] }) });
+});
+await page.reload(); await page.waitForSelector(".hero");
+await page.click("[data-wo='w_" + "e".repeat(16) + "']"); await page.waitForSelector(".sheet .kpis"); await shot("24b-training-detail"); await page.mouse.click(5, 5); await page.waitForTimeout(200);
 await page.goto(base + "/#/plan"); await page.waitForSelector("[data-goal-new]");
 await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='weight']"); await page.fill("#gtarget", "70");
@@ -166,6 +175,7 @@ await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='pace']"); await page.fill("#gtarget", "5:30"); await page.click("#gsave"); await page.waitForTimeout(300);
 await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='exercise']"); await page.fill("#gtarget", "12"); await page.click("#gsave"); await page.waitForTimeout(300);
+await page.goto(base + "/#/statistik"); await page.waitForSelector(".seg"); if (!(await page.$(".loadbars"))) await page.click("[data-st=training]"); await page.waitForSelector(".loadbars"); await shot("26c-belastung");
 await page.goto(base + "/#/heute"); await page.waitForSelector(".gitem");
 if ((await page.$$(".gitem")).length !== 3) fail("Zielkarten fehlen");
 await page.click("#heroToggle"); await page.waitForSelector(".hero:not(.open)");

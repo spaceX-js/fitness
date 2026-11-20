@@ -1,6 +1,6 @@
 // Fitness – Oberfläche. Läuft nur nach Anmeldung; Daten kommen von /api (Cloudflare Worker + D1).
 import { EXERCISES, DAY_NAMES, REGIONS, ZONES, PROFILE, weekOf, dayIndex, slotOf, defaultsFor, sourceDay, swapDays, validatePlan, diffPlans, runFor, focusFor } from "./plan.js";
-import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK, readiness } from "./coach.js";
+import { plannedSession, suggestions, applyOp, addDays, daysBetween, fmtKg, fmtDate, FEEL, SICK, readiness, trainingLoad, LOAD_TEXT, aboveZ2 } from "./coach.js";
 import { METRICS, GROUPS as HGROUPS, SHORTCUT_TYPES, fmtVal, avgRange, processUpload } from "./health.js";
 import { mount, still } from "./anim.js";
 import { GOAL_TYPES, GOAL_KEYS, evaluateGoal, fmtGoal, parseGoalValue, fmtPace, unitOf, titleOf, seriesOf, currentOf } from "./goals.js";
@@ -191,7 +191,7 @@ function viewToday() {
     try { await api("/api/log/delete", { id: day + "-main" }); S.logs = S.logs.filter(l => l.id !== day + "-main"); toast("Wieder offen"); render(); } catch (e) { toast(e.message); }
   });
   bindSuggestions(sugs);
-  bindGoals();
+  bindGoals(); bindWorkouts();
   $app.querySelectorAll("[data-watch]").forEach(b => b.addEventListener("click", async () => {
     const w = (S.health.workouts || []).find(x => x.id === b.dataset.watch); if (!w) return;
     const mob = b.dataset.as === "mob";
@@ -210,7 +210,9 @@ function watchCards(day, s, log) {
     const done = mob ? (logById(day + "-mob") || {}).status === "done" : !!log;
     const can = !done && (mob || (str && s.kind === "strength"));
     const vals = [w.start ? new Date(w.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr" : "", w.min ? Math.round(w.min) + " Min." : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : ""].filter(Boolean);
-    return `<div class="card sug ${done ? "" : "good"}"><b>⌚ ${esc(w.kind)}</b> <span class="mute small">Apple Watch</span>
+    if (w.load) vals.push("Belastung " + w.load);
+    return `<div class="card sug ${done ? "" : "good"}"><button class="wohead" data-wo="${esc(w.id)}"><b>⌚ ${esc(w.kind)}</b> <span class="mute small">Apple Watch</span><span class="grow"></span><span class="mute">›</span></button>
+      ${zoneBar(w)}
       <p class="small" style="margin:4px 0 ${can ? 10 : 0}px">${esc(vals.join(" · "))}${done ? " · <span class=\"ok\">✓ eingetragen</span>" : ""}</p>
       ${can ? `<button class="btn sm" data-watch="${esc(w.id)}" data-as="${mob ? "mob" : "main"}">${mob ? "Morgenroutine als erledigt eintragen" : "Training als erledigt eintragen"}</button>` : ""}</div>`;
   }).join("");
@@ -674,6 +676,40 @@ function viewPlan() {
   bindGoals();
 }
 
+/* ---------- Training im Detail: Pulszonen, Verlauf, Belastung, Erholung ---------- */
+function zoneBar(w) {
+  const z = w && w.zones; if (!z) return "";
+  const t = z.reduce((x, y) => x + y, 0); if (!t) return "";
+  return `<div class="zbar">${z.map((s, i) => s ? `<span style="width:${(s / t * 100).toFixed(1)}%;background:${ZONES[i].color}"></span>` : "").join("")}</div>`;
+}
+function bindWorkouts() { $app.querySelectorAll("[data-wo]").forEach(b => b.addEventListener("click", () => workoutSheet(b.dataset.wo))); }
+function workoutSheet(id) {
+  const w = ((S.health && S.health.workouts) || []).find(x => x.id === id); if (!w) return;
+  const tm = s => s ? new Date(s).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
+  const t = w.zones ? w.zones.reduce((a, b) => a + b, 0) : 0, above = aboveZ2(w);
+  const kpi = (v, l) => v ? `<div class="kpi"><b>${esc(String(v))}</b><span>${esc(l)}</span></div>` : "";
+  const hrr = w.hrr ? `${w.hrr} bpm` : null;
+  sheet(`<h2 style="margin-top:0">${esc(w.kind)}</h2><p class="mute small" style="margin:-6px 0 12px">${fmtDate(w.date)} · ${tm(w.start)}–${tm(w.end)} Uhr</p>
+    <div class="kpis">${kpi(w.min ? Math.round(w.min) + " Min." : "", "Dauer")}${kpi(w.hr_avg ? Math.round(w.hr_avg) : "", "Ø Puls")}${kpi(w.hr_max ? Math.round(w.hr_max) : "", "Max. Puls")}
+      ${kpi(w.load, "Belastung")}${kpi(w.kcal ? Math.round(w.kcal) : "", "aktive kcal")}${kpi(hrr, "Puls-Erholung")}${kpi(w.km ? String(w.km.toFixed(2)).replace(".", ",") : "", "km")}${kpi(w.km && w.min ? paceOf(w.min, w.km) : "", "Pace /km")}</div>
+    ${w.curve && w.curve.length > 1 ? `<h3>Pulsverlauf</h3>${hrChart(w.curve)}` : ""}
+    ${t ? `<h3 style="margin-top:14px">Pulszonen</h3><div class="zbar big">${w.zones.map((s, i) => s ? `<span style="width:${(s / t * 100).toFixed(1)}%;background:${ZONES[i].color}"></span>` : "").join("")}</div>
+      <div class="list" style="margin-top:6px">${w.zones.map((s, i) => `<div class="it small"><span class="zdot" style="background:${ZONES[i].color}"></span><span class="grow">Zone ${i + 1} <span class="mute">${ZONES[i].to < 999 ? ZONES[i].from + "–" + ZONES[i].to : "ab " + ZONES[i].from} bpm</span></span><span>${Math.round(s / 60)} Min. <span class="mute">${Math.round(s / t * 100)} %</span></span></div>`).join("")}</div>
+      ${w.run && above != null ? `<p class="small" style="margin:8px 0 0">${above > 40 ? `<span class="warnTxt">${above} % über Zone 2</span> – für einen lockeren Lauf zu schnell.` : `${100 - above} % in Zone 1–2.`}</p>` : ""}` : `<p class="mute small">Für Pulszonen und Verlauf fehlen noch Pulswerte – sie kommen mit dem nächsten Fitness Sync.</p>`}
+    ${hrr ? `<p class="mute tiny" style="margin:10px 0 0">Puls-Erholung: um so viel fällt der Puls in der ersten Minute nach dem Training. Über 20 bpm ist gut, über 30 sehr gut.</p>` : ""}`);
+}
+function hrChart(curve) {
+  const W = 320, H = 150, l = 30, r = 6, t = 8, b = 20;
+  const xs = curve.map(p => p[0]), maxX = Math.max(...xs) || 1, vs = curve.map(p => p[1]);
+  const lo = Math.max(40, Math.min(...vs) - 10), hi = Math.min(210, Math.max(...vs) + 10);
+  const x = m => l + m / maxX * (W - l - r), y = v => t + (hi - v) / (hi - lo) * (H - t - b);
+  const bands = ZONES.map(z => { const a = Math.max(lo, z.from), e = Math.min(hi, z.to + 1); return e > a ? `<rect x="${l}" width="${W - l - r}" y="${y(e).toFixed(1)}" height="${(y(a) - y(e)).toFixed(1)}" fill="${z.color}" opacity=".13"/>` : ""; }).join("");
+  const ticks = [lo, Math.round((lo + hi) / 2), hi].map(v => `<text x="${l - 4}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="ax">${Math.round(v)}</text>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Pulsverlauf">${bands}${ticks}
+    <path d="${curve.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + y(p[1]).toFixed(1)).join("")}" fill="none" stroke="var(--stop)" stroke-width="2" stroke-linejoin="round"/>
+    <text x="${l}" y="${H - 4}" class="ax">0</text><text x="${W - r}" y="${H - 4}" text-anchor="end" class="ax">${Math.round(maxX)} Min.</text></svg>`;
+}
+
 /* ---------- Ziele ---------- */
 function goalCards(today) {
   const G = S.goals || [];
@@ -897,6 +933,7 @@ function viewStats() {
     $app.innerHTML = `<h1>Statistik</h1>${statSwitch(tabSel)}` + viewHealthStats();
     bindStatSwitch();
     $app.querySelectorAll("[data-metric]").forEach(b => b.addEventListener("click", () => healthDetail(b.dataset.metric)));
+    bindWorkouts();
     return;
   }
   return viewTrainingStats();
@@ -942,7 +979,17 @@ function viewTrainingStats() {
     if (pts.length) prog.push({ slot, pts });
   }
 
-  $app.innerHTML = `<h1>Statistik</h1>${statSwitch("training")}<p class="mute small" style="margin:0 0 12px">${curW ? "Woche " + Math.min(curW, 99) + " seit Planstart" : "Plan hat noch nicht begonnen"}</p>
+  const LD = trainingLoad(S.health && S.health.workouts, today);
+  const loadCard = LD.weeks.some(w => w.load) ? (() => {
+    const mx = Math.max(...LD.weeks.map(w => w.load), LD.chronic || 0, 1);
+    const cls = { high: "warnTxt", up: "warnTxt", ok: "ok", low: "mute", build: "mute" }[LD.status];
+    return `<div class="card"><div class="row"><b class="grow">Trainingsbelastung</b><span class="mute small">aus dem Puls</span></div>
+      <div class="loadbars">${LD.weeks.map((w, i) => `<div class="lb ${i === LD.weeks.length - 1 ? "cur" : ""}"><span class="tiny mute">${w.load || ""}</span><i style="height:${Math.round(w.load / mx * 70)}px"></i><span class="tiny mute">${fmtDate(w.from)}</span></div>`).join("")}
+        ${LD.chronic ? `<div class="lbavg" style="bottom:${18 + Math.round(LD.chronic / mx * 70)}px"></div>` : ""}</div>
+      <p class="small" style="margin:8px 0 0">Letzte 7 Tage <b>${LD.acute}</b>${LD.chronic ? ` · sonst Ø <b>${LD.chronic}</b>/Woche` : ""} – <span class="${cls}">${esc(LOAD_TEXT[LD.status])}</span></p>
+      <p class="mute tiny" style="margin:4px 0 0">Punkte nach Dauer × Pulshöhe (TRIMP). Lockere 45 Min. ≈ 50, harte Intervalle ≈ 80–120.</p></div>`;
+  })() : "";
+  $app.innerHTML = `<h1>Statistik</h1>${statSwitch("training")}${loadCard}<p class="mute small" style="margin:0 0 12px">${curW ? "Woche " + Math.min(curW, 99) + " seit Planstart" : "Plan hat noch nicht begonnen"}</p>
     <div class="kpis">
       <div class="kpi"><b>${thisW.strength + thisW.run}<span class="mute" style="font-size:15px">/${P.days.filter(d => d.kind === "strength" || d.kind === "run").length}</span></b><span>Einheiten diese Woche</span></div>
       <div class="kpi"><b>${thisW.km ? thisW.km.toFixed(1).replace(".", ",") : "0"}</b><span>km diese Woche</span></div>
@@ -1026,7 +1073,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.6.4</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.7.0</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -1164,8 +1211,8 @@ function viewHealthStats() {
   const rd = readiness(S.health, today);
   return `${rd.flags.length ? `<div class="note">Erholung: ${esc(rd.flags.join(", "))}</div>` : ""}
     ${groups || `<div class="card"><b>Noch keine Health-Daten</b><p class="mute small" style="margin:6px 0 10px">Richte einmal den Kurzbefehl ein – dann erscheinen hier Ruhepuls, HRV, Schlaf, VO₂max, Gewicht und mehr.</p><a class="btn sm" href="#/mehr/health">Zur Einrichtung</a></div>`}
-    ${W.length ? `<h2>Trainings (Apple Health)</h2><div class="card list">${W.map(w => `<div class="it small"><div class="grow"><b>${esc(w.kind)}</b> <span class="mute">${fmtDate(w.date)}</span>
-      <div class="mute">${[w.min ? Math.round(w.min) + " Min." : "", w.km ? String(w.km.toFixed(1)).replace(".", ",") + " km" : "", w.km && w.min ? paceOf(w.min, w.km) + " /km" : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : ""].filter(Boolean).join(" · ")}</div></div></div>`).join("")}</div>` : ""}`;
+    ${W.length ? `<h2>Trainings (Apple Health)</h2><div class="card list">${W.map(w => `<button class="it small wo" data-wo="${esc(w.id)}"><div class="grow"><b>${esc(w.kind)}</b> <span class="mute">${fmtDate(w.date)}</span>
+      <div class="mute">${[w.min ? Math.round(w.min) + " Min." : "", w.km ? String(w.km.toFixed(1)).replace(".", ",") + " km" : "", w.km && w.min ? paceOf(w.min, w.km) + " /km" : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : "", w.load ? "Belastung " + w.load : ""].filter(Boolean).join(" · ")}</div>${zoneBar(w)}</div><span class="mute">›</span></button>`).join("")}</div>` : ""}`;
 }
 async function healthDetail(m) {
   const def = METRICS[m];

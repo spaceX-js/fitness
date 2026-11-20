@@ -111,3 +111,14 @@ test("Tage in der Woche tauschen, ohne den Plan zu ändern", () => {
   assert.equal(sessionFor("2026-11-24", st).title, "Lauf – Zone 2", "nächste Woche wieder normal");
   assert.equal(swapDays(ov, "2026-11-17", "2026-11-18").moves["2026-11-16"], undefined, "zurücktauschen = wie im Plan");
 });
+
+test("Trainingsbelastung: Wochen, Verhältnis akut/chronisch", async () => {
+  const { trainingLoad } = await import("../public/coach.js");
+  const W = [];
+  for (let d = 1; d <= 28; d += 2) W.push({ date: "2026-10-" + String(d).padStart(2, "0"), load: 50 });   // ~175/Woche
+  assert.equal(trainingLoad(W, "2026-10-28").status, "ok");
+  W.push({ date: "2026-11-02", load: 200 }, { date: "2026-11-03", load: 200 }, { date: "2026-11-04", load: 150 });
+  const l = trainingLoad(W, "2026-11-04");
+  assert.equal(l.status, "high"); assert.ok(l.ratio > 1.5); assert.equal(l.weeks.length, 8); assert.equal(l.weeks[7].load, 550);
+  assert.equal(trainingLoad([{ date: "2026-11-03", load: 80 }], "2026-11-04").status, "build");
+});

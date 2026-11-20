@@ -209,3 +209,13 @@ svg.spark{width:96px;height:30px;flex:none}svg.spark path{fill:none;stroke:var(-
 .gitem.good .gdot{background:var(--good)}.gitem.warn .gdot{background:var(--warn)}
 .gitem .gbar{height:5px;margin-top:6px}.gitem.warn .gbar span{background:var(--warn)}.gitem.info .gbar span{background:var(--acc)}.gbody{padding-top:8px}
 @media (max-width:380px){.gval{font-size:13px}}
+
+/* Pulszonen, Belastung */
+.zbar{display:flex;height:6px;border-radius:99px;overflow:hidden;background:var(--line);margin-top:6px}.zbar.big{height:14px;border-radius:8px}.zbar span{display:block;height:100%}
+.zdot{width:10px;height:10px;border-radius:3px;flex:none;margin-right:8px}
+.wohead{display:flex;align-items:center;gap:6px;width:100%;background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+button.it.wo{width:100%;background:none;border:0;font:inherit;color:inherit;text-align:left;cursor:pointer;align-items:center}
+.loadbars{position:relative;display:flex;align-items:flex-end;gap:6px;height:110px;margin-top:10px}.lb{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.lb i{display:block;width:100%;max-width:28px;border-radius:5px 5px 2px 2px;background:var(--acc);opacity:.45;min-height:2px}.lb.cur i{opacity:1}.lb .tiny{white-space:nowrap;font-size:10px}
+.lbavg{position:absolute;left:0;right:0;border-top:1.5px dashed var(--good)}
+svg.chart .ax{font-size:10px;fill:var(--mute)}

@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS health_daily (
 -- Apple Health: Trainings mit Werten aus dem Trainingszeitraum
 CREATE TABLE IF NOT EXISTS workouts (
   id TEXT PRIMARY KEY, date TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '', run INTEGER NOT NULL DEFAULT 0,
-  min REAL, km REAL, kcal REAL, hr_avg REAL, hr_max REAL, speed REAL, power REAL, stride REAL, gct REAL, source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+  min REAL, km REAL, kcal REAL, hr_avg REAL, hr_max REAL, speed REAL, power REAL, stride REAL, gct REAL, source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+  zones TEXT, load REAL, curve TEXT, hrr REAL
 );
 CREATE INDEX IF NOT EXISTS workouts_date ON workouts(date);
 
@@ -78,3 +79,7 @@ CREATE TABLE IF NOT EXISTS workout_marks (
   kind   TEXT NOT NULL,
   end_at TEXT NOT NULL
 );
+
+-- Migration v0.7.0 für bestehende Datenbanken (einmalig ausgeführt):
+--   ALTER TABLE workouts ADD COLUMN zones TEXT; ALTER TABLE workouts ADD COLUMN load REAL;
+--   ALTER TABLE workouts ADD COLUMN curve TEXT; ALTER TABLE workouts ADD COLUMN hrr REAL;

@@ -148,3 +148,18 @@ test("Watch: Pause mitten im Training ergibt ein Training ohne Pausenzeit", asyn
   assert.equal(w.length, 1); assert.ok(Math.abs(w[0].min - 18) < 0.5, "8 + 10 Min.: " + w[0].min);
   assert.equal(w[0].start, new Date(t0).toISOString()); assert.deepEqual(out.removed, ["w_" + "2".repeat(16)]);
 });
+
+test("Pulszonen, Belastung, Verlauf und Puls-Erholung je Training", async () => {
+  const { processUpload, hrStats } = await import("../public/health.js");
+  const t0 = Date.parse("2026-11-18T17:00:00Z"), hr = [], st = [];
+  for (let i = 0; i <= 30 * 6; i++) { hr.push(i < 90 ? 125 : 150); st.push(new Date(t0 + i * 10000).toISOString()); }   // 15 Min. Z1, 15 Min. Z3
+  hr.push(70); st.push(new Date(t0 + 50 * 60000).toISOString());
+  const text = JSON.stringify([{ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") }, { typ: "Cardio Recovery", werte: "27", start: new Date(t0 + 32 * 60000).toISOString() }]);
+  const out = processUpload(text, null, { marks: [{ id: "d".repeat(16), kind: "Krafttraining", end: new Date(t0 + 31 * 60000).toISOString() }] });
+  const w = out.workouts.find(x => x.id === "w_" + "d".repeat(16));
+  assert.ok(Math.abs(w.zones[0] - 900) <= 15 && Math.abs(w.zones[2] - 900) <= 15, JSON.stringify(w.zones));
+  assert.ok(w.load > 30 && w.load < 80, "TRIMP " + w.load);
+  assert.equal(w.hrr, 27);
+  assert.ok(w.curve.length >= 25 && w.curve[0][1] === 125 && w.curve[w.curve.length - 1][1] === 150);
+  assert.equal(hrStats([{ s: 1, bpm: 100 }], [{ s: 0, e: 10 }]), null);
+});

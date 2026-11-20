@@ -10,6 +10,25 @@ export const SICK = {
 export const FEEL = ["", "Zu leicht", "Leicht", "Passend", "Schwer", "Zu schwer"];
 
 // Erholung aus Apple-Health-Daten: Ruhepuls, HRV und Schlaf im Vergleich zu deinem Normalwert (letzte 4 Wochen)
+// Trainingsbelastung (TRIMP aus dem Puls): Wochensummen ab Montag, akut (7 Tage) zu chronisch (Ø der 4 Wochen davor)
+export function trainingLoad(workouts, today, weeks = 8) {
+  const W = (workouts || []).filter(w => Number.isFinite(w.load) && w.load > 0);
+  const mon = addDays(today, -((new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7));
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) { const from = addDays(mon, -7 * i), to = addDays(from, 6); out.push({ from, load: Math.round(W.filter(w => w.date >= from && w.date <= to).reduce((a, w) => a + w.load, 0)) }); }
+  const sum = (a, b) => Math.round(W.filter(w => w.date >= a && w.date <= b).reduce((s, w) => s + w.load, 0));
+  const acute = sum(addDays(today, -6), today), first = W.length ? W.map(w => w.date).sort()[0] : null;
+  const histWeeks = first ? Math.min(4, Math.floor(daysBetween(first, addDays(today, -7)) / 7) + 1) : 0;
+  const chronic = histWeeks >= 2 ? sum(addDays(today, -6 - 7 * histWeeks), addDays(today, -7)) / histWeeks : null;
+  const ratio = chronic ? acute / chronic : null;
+  const status = ratio == null ? "build" : ratio > 1.5 ? "high" : ratio > 1.3 ? "up" : ratio < 0.8 ? "low" : "ok";
+  return { weeks: out, acute, chronic: chronic == null ? null : Math.round(chronic), ratio, status };
+}
+export const LOAD_TEXT = { build: "Baut sich auf – nach 2 Wochen mit Pulsdaten gibt es den Vergleich.", ok: "Im grünen Bereich.", up: "Etwas mehr als sonst – gut für Fortschritt, auf Erholung achten.",
+  high: "Deutlich mehr als sonst – erhöhtes Verletzungsrisiko.", low: "Weniger als sonst – Erholung oder Lücke." };
+// Anteil Zeit über Zone 2 (in Prozent) für einen Lauf mit Pulszonen
+export function aboveZ2(w) { const z = w && w.zones; if (!z) return null; const t = z.reduce((a, b) => a + b, 0); return t ? Math.round((z[2] + z[3] + z[4]) / t * 100) : null; }
+
 export function readiness(health, today) {
   const d = (health && health.daily) || [];
   const recent = (m, days) => avgRange(d, m, addDays(today, -days + 1), today);
@@ -148,6 +167,17 @@ export function suggestions(state, today) {
         actions: [{ label: "Einschränkung eintragen", op: { type: "limit", region: r } }] });
 
   // 5) Läufe: Zone 2 zu schnell
+  // Belastungssprung (aus dem Puls der Watch-Trainings)
+  const ld = trainingLoad(state.health && state.health.workouts, today);
+  if (ld.status === "high") add({ key: "load-" + today.slice(0, 8) + Math.floor(Number(today.slice(8)) / 7), level: "warn", title: "Belastung stark gestiegen",
+    text: "Die letzten 7 Tage: " + ld.acute + " Punkte Trainingsbelastung, sonst Ø " + ld.chronic + " pro Woche. Mehr als das 1,5-Fache erhöht das Verletzungsrisiko – die nächsten Tage lieber locker.",
+    actions: [{ label: "Diese Woche als Deload", op: { type: "deload", week: weekOf(state.start, today) } }] });
+  // Lockere Läufe laut Pulszonen zu schnell
+  const easy = ((state.health && state.health.workouts) || []).filter(w => w.run && w.zones && w.date >= addDays(today, -14) && w.date <= today)
+    .filter(w => { const s = sessionFor(w.date, state, {}); return s.kind === "run" && ["z2", "long"].includes(s.run); });
+  const fast = easy.filter(w => aboveZ2(w) > 40);
+  if (fast.length) { const w = fast[0]; add({ key: "z2zones-" + w.date, level: "info", title: "Lockerer Lauf zu schnell",
+    text: "Am " + fmtDate(w.date) + " warst du " + aboveZ2(w) + " % der Zeit über Zone 2 (über 140 bpm). Für die Grundlage langsamer laufen – Gehpausen sind völlig in Ordnung.", actions: [] }); }
   const z2 = logsOf(state, l => l.kind === "run" && l.data && l.data.run === "z2" && Number(l.data.hr) > 0).slice(-2);
   if (z2.length === 2 && z2.every(l => Number(l.data.hr) > 141))
     add({ key: "z2fast-" + z2[1].date, level: "info", title: "Zone-2-Läufe zu schnell",

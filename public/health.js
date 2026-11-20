@@ -1,3 +1,4 @@
+import { PROFILE, ZONES } from "./plan.js";
 // Apple-Health-Daten: welche Werte es gibt, wie sie heißen und wie aus Einzelmessungen Tageswerte werden.
 // Wird vom Server (Import) und von der Oberfläche (Anzeige) benutzt. Keine Abhängigkeiten.
 
@@ -317,6 +318,14 @@ export function aggregate(items0, opts = {}) {
     if (cur) wlist.push(cur);
     wlist = wlist.filter(w => w.e - w.s >= 480000);
   }
+  const hrSorted = (samples.hr || []).map(x => ({ s: x.s, bpm: num("hr", x) })).filter(x => Number.isFinite(x.bpm)).sort((a, b) => a.s - b.s);
+  const recov = (samples.hr_recovery || []).map(x => ({ s: x.s, v: num("hr_recovery", x) })).filter(x => Number.isFinite(x.v));
+  const addHr = (wo, parts) => {
+    const st = hrStats(hrSorted, parts);
+    wo.zones = st ? st.zones : null; wo.load = st ? st.load : null; wo.curve = st ? st.curve : null;
+    const end = parts[parts.length - 1].e, rc = recov.find(x => x.s >= end - 120000 && x.s <= end + 30 * 60000);   // Cardio-Erholung kommt kurz nach dem Ende
+    wo.hrr = rc ? Math.round(rc.v) : null;
+  };
   const seen = new Set();
   for (const w of wlist) {
     const id = new Date(Math.round(w.s / 60000) * 60000).toISOString();
@@ -328,6 +337,7 @@ export function aggregate(items0, opts = {}) {
       run: /lauf|run|jog/i.test(label), min: r((w.e - w.s) / 60000), km: r(sumBest("dist", w)), kcal: r(sumBest("active_kcal", w)),
       hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null,
       speed: r(avgOf("run_speed", w)), power: r(avgOf("run_power", w)), stride: r(avgOf("run_stride", w)), gct: r(avgOf("run_gct", w)), source: w.src.slice(0, 60) });
+    addHr(workouts[workouts.length - 1], [{ s: w.s, e: w.e }]);
   }
   // Trainings von der Apple-Watch-Automation („Training beendet“): Beginn aus dem dichten Puls während des Trainings
   const hrAll = (samples.hr || []).slice().sort((a, b) => a.s - b.s), removed = [], fromMarks = [];
@@ -356,6 +366,7 @@ export function aggregate(items0, opts = {}) {
       Object.assign(wo, { start: new Date(parts[0].s).toISOString(), end: new Date(parts[parts.length - 1].e).toISOString(),
         min: r(parts.reduce((a, p) => a + (p.e - p.s), 0) / 60000), kcal: r(kc) || null,
         hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null });
+      addHr(wo, parts);
     };
     if (fromMarks.length && !est) {
       const last = fromMarks[fromMarks.length - 1];
@@ -388,6 +399,30 @@ export function fmtVal(key, v) {
 export function avgRange(daily, metric, from, to) {
   const v = daily.filter(r => r.metric === metric && r.date >= from && r.date <= to).map(r => r.value);
   return v.length ? { v: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
+}
+
+/* ---------- Puls im Training: Zonen, Belastung, Verlauf ---------- */
+// samples: [{s, bpm}] aufsteigend; parts: aktive Abschnitte [{s, e}] (ohne Pausen)
+export function hrStats(samples, parts, prof = PROFILE) {
+  const zones = [0, 0, 0, 0, 0]; let load = 0, total = 0;
+  const inParts = samples.filter(x => parts.some(p => x.s >= p.s - 30000 && x.s <= p.e + 30000));
+  if (inParts.length < 3) return null;
+  const zi = b => { for (let i = ZONES.length - 1; i >= 0; i--) if (b >= ZONES[i].from) return i; return 0; };
+  const rest = prof.restHr || 60, max = prof.maxHr || 180;
+  for (let i = 0; i < inParts.length; i++) {
+    const x = inParts[i], next = inParts[i + 1], p = parts.find(q => x.s >= q.s - 30000 && x.s <= q.e + 30000);
+    const until = Math.min(next && next.s <= p.e ? next.s : p.e, x.s + 60000);   // Lücken höchstens 1 Min. fortschreiben
+    const dt = Math.max(0, until - Math.max(x.s, p.s)) / 1000;
+    if (!dt) continue;
+    zones[zi(x.bpm)] += dt; total += dt;
+    const r = Math.max(0, Math.min(1, (x.bpm - rest) / (max - rest)));
+    load += dt / 60 * r * 0.64 * Math.exp(1.92 * r);   // Banister-TRIMP
+  }
+  // Verlauf: höchstens 60 Punkte [Minute ab Start, Ø Puls]
+  const t0 = parts[0].s, span = (parts[parts.length - 1].e - t0) / 60000, step = Math.max(1, Math.ceil(span / 60)), buckets = new Map();
+  for (const x of inParts) { const k = Math.floor((x.s - t0) / 60000 / step); const b = buckets.get(k) || [0, 0]; b[0] += x.bpm; b[1]++; buckets.set(k, b); }
+  const curve = [...buckets].sort((a, b) => a[0] - b[0]).map(([k, [s, n]]) => [k * step, Math.round(s / n)]);
+  return { zones: zones.map(Math.round), load: Math.round(load), curve };
 }
 
 /* ---------- Übertragung lesen (im Browser) ---------- */
