@@ -176,6 +176,15 @@ await page.click("[data-t='pace']"); await page.fill("#gtarget", "5:30"); await 
 await page.click("[data-goal-new]"); await page.waitForSelector("#gtarget");
 await page.click("[data-t='exercise']"); await page.fill("#gtarget", "12"); await page.click("#gsave"); await page.waitForTimeout(300);
 await page.goto(base + "/#/statistik"); await page.waitForSelector(".seg"); if (!(await page.$(".loadbars"))) await page.click("[data-st=training]"); await page.waitForSelector(".loadbars"); await shot("26c-belastung");
+await page.evaluate(async () => {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const L = (b) => fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json", "X-Fit": "1" }, body: JSON.stringify(b) });
+  await L({ id: today + "-main", date: today, kind: "run", status: "done", data: { run: "interval", min: 40, km: 6.6, hr: 142, feel: 3, note: "Lief gut", health: "w_" + "e".repeat(16) } });
+});
+await page.goto(base + "/#/heute"); await page.waitForSelector(".hero"); await page.reload(); await page.waitForSelector(".hero");
+if (!(await page.textContent(".hero")).includes("6,6 km")) fail("Ergebnis fehlt in der Tageskarte");
+if (!(await page.$(".hero.open"))) await page.click("#heroToggle");
+await page.waitForSelector(".hero.open"); await shot("26d-ergebnis");
 await page.goto(base + "/#/heute"); await page.waitForSelector(".gitem");
 if ((await page.$$(".gitem")).length !== 3) fail("Zielkarten fehlen");
 await page.click("#heroToggle"); await page.waitForSelector(".hero:not(.open)");

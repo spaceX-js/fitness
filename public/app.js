@@ -132,7 +132,8 @@ function viewToday() {
   for (const l of st.limits || []) chips.push(`<span class="badge warn">Einschränkung: ${esc(REGIONS[l.region])}</span>`);
   const heroKind = s.blocked && isToday ? "blocked" : s.kind;
   const doneTxt = log ? (log.status === "done" ? "✓ Erledigt" : log.status === "skipped" ? "Ausgelassen" : "Angefangen") : "";
-  const sub = s.kind === "strength" ? s.sub + (s.minutes ? " · " + s.minutes + " Min." : "") : s.kind === "run" ? s.short : s.sub;
+  const res = log && log.status === "done" ? resultOf(day, s, log) : null;   // nach dem Training: Ergebnis statt Vorschau
+  const sub = res ? res.line : s.kind === "strength" ? s.sub + (s.minutes ? " · " + s.minutes + " Min." : "") : s.kind === "run" ? s.short : s.sub;
   const mob = logById(today + "-mob");
   let weekHtml = "";
   for (let i = 0; i < 7; i++) {
@@ -153,8 +154,9 @@ function viewToday() {
     <div class="hero ${heroKind} ${heroOpen ? "open" : ""}">
       <button class="herohead" id="heroToggle" aria-expanded="${heroOpen}">
         <div class="grow"><div class="k">${isToday ? "Heute" : esc(DAY_NAMES[dayIndex(day)] + ", " + fmtDate(day))} · ${esc(KIND_LABEL[s.kind])}${s.movedFrom != null ? " · getauscht mit " + esc(DAY_NAMES[s.movedFrom]) : ""}</div>
-          <h2>${esc(s.title)}</h2><p>${esc(sub)}</p></div><span class="chev">${heroOpen ? "▴" : "▾"}</span></button>
-      ${heroOpen ? shortPreview(s) : ""}
+          <h2>${res ? "✓ " : ""}${esc(s.title)}</h2><p>${esc(sub)}</p></div><span class="chev">${heroOpen ? "▴" : "▾"}</span></button>
+      ${res ? res.zones : ""}
+      ${heroOpen ? (res ? res.detail : shortPreview(s)) : ""}
       <div class="row wrap">${doneTxt ? `<span class="done">${doneTxt}</span>` : ""}<a class="btn" href="#/tag/${day}">${log ? "Öffnen" : !isToday ? "Ansehen" : s.blocked ? "Ansehen" : "Starten"}</a>
       ${log && log.status === "skipped" ? `<button class="btn swap" id="unskipDay">Doch trainieren</button>` : ""}
       ${heroOpen && !log && s.kind !== "rest" ? `<button class="btn swap" id="skipDayHome">Auslassen</button>` : ""}
@@ -242,6 +244,45 @@ function swapSheet(day, mon) {
   });
 }
 // Kurzfassung einer Einheit für die Startseite
+// Ergebnis eines erledigten Trainings: eine Zeile für die eingeklappte Karte, Details zum Ausklappen
+function resultOf(day, s, log) {
+  const d = log.data || {}, W = ((S.health && S.health.workouts) || []).filter(w => w.date === day);
+  const w = W.find(x => x.id === d.watch || x.id === d.health) || (s.kind === "run" ? W.find(x => x.run) : s.kind === "strength" ? W.find(x => /kraft|strength|funktion|hiit/i.test(x.kind)) : null);
+  const line = [], rows = [], n = v => num(String(v == null ? "" : v).replace(",", "."));
+  const min = n(d.min) || (w && w.min), hr = n(d.hr) || (w && w.hr_avg);
+  if (s.kind === "strength") {
+    let done = 0, planned = 0, vol = 0;
+    for (const e of Object.values(d.ex || {})) {
+      const sets = e.sets || [], ok = sets.filter(x => x.done); planned += sets.length; done += ok.length;
+      vol += ok.reduce((a, x) => a + n(x.w) * n(x.r), 0);
+      if (!ok.length || !EXERCISES[e.id]) continue;
+      const best = ok.reduce((b, x) => (n(x.w) * 100 + n(x.r)) > (n(b.w) * 100 + n(b.r)) ? x : b, ok[0]);
+      const unit = EXERCISES[e.id].type === "time" ? " s" : "";
+      rows.push([EXERCISES[e.id].name, ok.length + " × " + (n(best.r) || "–") + unit + (n(best.w) ? " · " + fmtKg(n(best.w)) + " kg" : "")]);
+    }
+    if (planned) line.push(done + "/" + planned + " Sätze");
+    if (vol) line.push(Math.round(vol).toLocaleString("de-DE") + " kg bewegt");
+  } else if (s.kind === "run") {
+    const km = n(d.km) || (w && w.km);
+    if (km) line.push(String(Math.round(km * 100) / 100).replace(".", ",") + " km");
+    if (km && min) line.push(paceOf(min, km) + " /km");
+  } else {
+    const it = d.items || {}, k = Object.values(it).filter(Boolean).length;
+    if (k) line.push(k + " Übungen"); if (n(d.walk)) line.push(n(d.walk) + " Min. Spaziergang");
+  }
+  if (min) line.unshift(Math.round(min) + " Min.");
+  if (hr) line.push("Ø " + Math.round(hr) + " bpm");
+  if (w && w.load) rows.push(["Belastung", String(w.load)]);
+  if (w && w.kcal) rows.push(["Aktive Energie", Math.round(w.kcal) + " kcal"]);
+  if (w && w.hr_max) rows.push(["Max. Puls", Math.round(w.hr_max) + " bpm"]);
+  if (w && w.hrr) rows.push(["Puls-Erholung", w.hrr + " bpm"]);
+  if (d.feel) rows.push(["Gefühl", FEEL[d.feel]]);
+  if (d.pain) rows.push(["Schmerz", String(d.pain)]);
+  const detail = `<ul class="mini">${rows.map(([k, v]) => `<li><span>${esc(k)}</span><span>${esc(v)}</span></li>`).join("")}</ul>
+    ${d.note ? `<p class="small" style="margin:-4px 0 10px;opacity:.9">„${esc(d.note)}“</p>` : ""}
+    ${w ? `<button class="btn swap sm" data-wo="${esc(w.id)}" style="margin:-2px 0 12px">Puls & Zonen ansehen</button>` : ""}`;
+  return { line: line.join(" · ") || "Erledigt", detail, zones: w && w.zones ? `<div style="margin:-6px 0 12px">${zoneBar(w)}</div>` : "" };
+}
 function shortPreview(s) {
   if (s.kind === "strength") {
     const list = s.items.filter(i => !i.skipped);
@@ -1073,7 +1114,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.7.2</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.7.3</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
