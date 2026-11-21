@@ -188,6 +188,8 @@ test("Watch: echte Messungen – minutengenau, Meldung 14 Min. nach dem Ende, Pa
   const marks = [{ id: "1".repeat(16), kind: "Core-Training", end: "2026-11-20T11:38:20.311Z" }, { id: "2".repeat(16), kind: "Core-Training", end: "2026-11-20T11:55:22.499Z" }];
   const out = processUpload(text, null, { marks });
   const w = out.workouts.filter(x => x.id.startsWith("w_"));
-  assert.equal(w.length, 1, JSON.stringify(w)); assert.equal(w[0].min, 13); assert.equal(w[0].start, "2026-11-20T11:29:00.000Z");
-  assert.ok(w[0].zones[0] > 700, "Zonenzeit über die Minuten verteilt: " + w[0].zones);
+  assert.equal(w.length, 1, JSON.stringify(w)); assert.equal(w[0].start, "2026-11-20T11:29:00.000Z");
+  assert.equal(w[0].end, "2026-11-20T11:38:20.311Z", "erste Meldung im Block = echtes Ende (danach misst die Watch noch nach)");
+  assert.ok(Math.abs(w[0].min - 9.3) < 0.1, String(w[0].min));
+  assert.ok(w[0].zones[0] > 500, "Zonenzeit über die Minuten verteilt: " + w[0].zones);
 });

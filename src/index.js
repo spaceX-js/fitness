@@ -8,7 +8,7 @@ import { METRICS } from "../public/health.js";
 import { cleanGoals } from "../public/goals.js";
 
 const COOKIE = "__Host-fit";
-const VERSION = "0.7.5";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
+const VERSION = "0.7.6";   // ändert die Adressen von CSS und Skript bei jedem Update → kein alter Zwischenspeicher
 const SESSION_DAYS = 30;
 const MAX_FAILS_IP = 5, MAX_FAILS_ALL = 30;          // pro 15 Minuten je Adresse / pro Stunde insgesamt
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -201,7 +201,7 @@ async function api(request, env, settings, url, session) {
       ops.push(env.DB.prepare("INSERT INTO health_daily (date, metric, value, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(date, metric) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(r.date, r.metric, r.value, now));
     for (const x of wos) if (x && typeof x.id === "string" && x.id.length < 40 && isDate(x.date))
       ops.push(env.DB.prepare(`INSERT INTO workouts (id, date, start, end, kind, run, min, km, kcal, hr_avg, hr_max, speed, power, stride, gct, source, updated_at, zones, load, curve, hrr)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET zones = COALESCE(excluded.zones, workouts.zones), load = COALESCE(excluded.load, workouts.load),
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET date = excluded.date, start = excluded.start, zones = COALESCE(excluded.zones, workouts.zones), load = COALESCE(excluded.load, workouts.load),
         curve = COALESCE(excluded.curve, workouts.curve), hrr = COALESCE(excluded.hrr, workouts.hrr), end = excluded.end, kind = excluded.kind, run = excluded.run, min = excluded.min,
         km = COALESCE(excluded.km, workouts.km), kcal = COALESCE(excluded.kcal, workouts.kcal), hr_avg = COALESCE(excluded.hr_avg, workouts.hr_avg), hr_max = COALESCE(excluded.hr_max, workouts.hr_max),
         speed = COALESCE(excluded.speed, workouts.speed), power = COALESCE(excluded.power, workouts.power), stride = COALESCE(excluded.stride, workouts.stride), gct = COALESCE(excluded.gct, workouts.gct), updated_at = excluded.updated_at`)

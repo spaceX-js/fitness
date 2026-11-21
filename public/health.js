@@ -364,7 +364,12 @@ export function aggregate(items0, opts = {}) {
       if (last != null) {
         let first = last;
         while (dense(first - 1) || dense(first - 2)) first -= dense(first - 1) ? 1 : 2;   // eine Minute Lücke erlaubt
-        if (last + 1 - first >= 4) { start = first * M; endT = (last + 1) * M; }
+        if (last + 1 - first >= 4) {
+          start = first * M; endT = (last + 1) * M;
+          // Nach dem Training misst die Watch noch ein paar Minuten dicht weiter (für die Puls-Erholung):
+          // liegt die Meldung im Block, ist sie das echte Ende
+          if (end > start + 4 * M && end < endT) endT = end;
+        }
       }
     }
     if (start == null) {
