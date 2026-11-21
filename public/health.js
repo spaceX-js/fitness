@@ -385,6 +385,7 @@ export function aggregate(items0, opts = {}) {
     const build = (wo, parts) => {   // Werte aus allen aktiven Abschnitten (ohne Pausen)
       const hr = parts.flatMap(p => inWin("hr", p).map(x => num("hr", x))).filter(Number.isFinite);
       const kc = parts.reduce((a, p) => a + (sumBest("active_kcal", p) || 0), 0);
+      if (/geh|walk|wander|lauf|run|jog/i.test(wo.kind)) { const km = parts.reduce((a, p) => a + (sumBest("dist", p) || 0), 0); wo.km = km ? r(km) : null; }   // Strecke bei Gehen/Laufen
       Object.assign(wo, { start: new Date(parts[0].s).toISOString(), end: new Date(parts[parts.length - 1].e).toISOString(),
         min: r(parts.reduce((a, p) => a + (p.e - p.s), 0) / 60000), kcal: r(kc) || null,
         hr_avg: hr.length ? Math.round(hr.reduce((a, b) => a + b, 0) / hr.length) : null, hr_max: hr.length ? Math.max(...hr) : null });

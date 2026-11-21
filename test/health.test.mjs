@@ -193,3 +193,12 @@ test("Watch: echte Messungen – minutengenau, Meldung 14 Min. nach dem Ende, Pa
   assert.ok(Math.abs(w[0].min - 9.3) < 0.1, String(w[0].min));
   assert.ok(w[0].zones[0] > 500, "Zonenzeit über die Minuten verteilt: " + w[0].zones);
 });
+
+test("Watch: Gehen bekommt die Strecke aus dem Zeitraum", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const hr = [], st = [], dv = [], ds = [], de = [];
+  for (let m = 0; m < 30; m++) { const t = "21.11.2026, 13:" + String(m).padStart(2, "0"); for (let q = 0; q < 10; q++) { hr.push(95); st.push(t); } dv.push("0.1"); ds.push(t); de.push("21.11.2026, 13:" + String(m).padStart(2, "0")); }
+  const text = JSON.stringify([{ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") }, { typ: "Walking + Running Distance", werte: dv.join("\n"), start: ds.join("\n"), quelle: ds.map(() => "Apple Watch von Jonas").join("\n") }]);
+  const w = processUpload(text, null, { marks: [{ id: "9".repeat(16), kind: "Gehen", end: "2026-11-21T12:31:00.000Z" }] }).workouts.find(x => x.id === "w_" + "9".repeat(16));
+  assert.ok(w && w.min >= 29 && w.min <= 31, JSON.stringify(w)); assert.ok(Math.abs(w.km - 3) < 0.15, "km " + w.km); assert.equal(w.run, false);
+});

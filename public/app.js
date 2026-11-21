@@ -198,6 +198,10 @@ function viewToday() {
     const w = (S.health.workouts || []).find(x => x.id === b.dataset.watch); if (!w) return;
     const mob = b.dataset.as === "mob";
     try {
+      if (b.dataset.as === "walk") {   // Erholungstag: Spaziergang zum Eintrag hinzufügen, Mobility bleibt offen
+        const L = logById(day + "-main"), data = { items: {}, ...(L && L.data), walk: Math.round(w.min), watch: w.id };
+        await saveLog({ id: day + "-main", date: day, kind: "recovery", status: L ? L.status : "partial", data }); toast("Spaziergang eingetragen"); render(); return;
+      }
       await saveLog(mob ? { id: day + "-mob", date: day, kind: "mobility", status: "done", data: { items: Object.fromEntries(S.plan.data.mobility.map(m => [m.id, true])), watch: w.id } }
         : { id: day + "-main", date: day, kind: "strength", status: "done", data: { workout: s.workout, ex: {}, watch: w.id, min: w.min, hr: w.hr_avg, pv: planRef() } });
       toast("Eingetragen"); render();
@@ -208,15 +212,15 @@ function viewToday() {
 function watchCards(day, s, log) {
   const W = ((S.health && S.health.workouts) || []).filter(w => w.date === day && w.id.startsWith("w_"));
   return W.map(w => {
-    const mob = /core|mobil|yoga|dehn|flex/i.test(w.kind), str = /kraft|strength|hiit|funktion/i.test(w.kind);
-    const done = mob ? (logById(day + "-mob") || {}).status === "done" : !!log;
-    const can = !done && (mob || (str && s.kind === "strength"));
-    const vals = [w.start ? new Date(w.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr" : "", w.min ? Math.round(w.min) + " Min." : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : ""].filter(Boolean);
+    const mob = /core|mobil|yoga|dehn|flex/i.test(w.kind), str = /kraft|strength|hiit|funktion/i.test(w.kind), walk = /geh|walk|wander/i.test(w.kind);
+    const done = mob ? (logById(day + "-mob") || {}).status === "done" : walk ? !!(log && log.data && log.data.walk) : !!log;
+    const can = !done && (mob || (str && s.kind === "strength") || (walk && s.kind === "recovery"));
+    const vals = [w.start ? new Date(w.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr" : "", w.min ? Math.round(w.min) + " Min." : "", w.km ? String(w.km.toFixed(2)).replace(".", ",") + " km" : "", w.hr_avg ? "Ø " + Math.round(w.hr_avg) + " bpm" : "", w.kcal ? Math.round(w.kcal) + " kcal" : ""].filter(Boolean);
     if (w.load) vals.push("Belastung " + w.load);
     return `<div class="card sug ${done ? "" : "good"}"><button class="wohead" data-wo="${esc(w.id)}"><b>⌚ ${esc(w.kind)}</b> <span class="mute small">Apple Watch</span><span class="grow"></span><span class="mute">›</span></button>
       ${zoneBar(w)}
       <p class="small" style="margin:4px 0 ${can ? 10 : 0}px">${esc(vals.join(" · "))}${done ? " · <span class=\"ok\">✓ eingetragen</span>" : ""}</p>
-      ${can ? `<button class="btn sm" data-watch="${esc(w.id)}" data-as="${mob ? "mob" : "main"}">${mob ? "Morgenroutine als erledigt eintragen" : "Training als erledigt eintragen"}</button>` : ""}</div>`;
+      ${can ? `<button class="btn sm" data-watch="${esc(w.id)}" data-as="${mob ? "mob" : walk ? "walk" : "main"}">${mob ? "Morgenroutine als erledigt eintragen" : walk ? "Als Spaziergang eintragen" : "Training als erledigt eintragen"}</button>` : ""}</div>`;
   }).join("");
 }
 // Tage innerhalb der laufenden Woche tauschen – ohne neue Planversion
@@ -1114,7 +1118,7 @@ function viewMore() {
     <div class="card"><b>Deine Daten</b><p class="mute small" style="margin:4px 0 10px">Alles liegt in deiner eigenen Cloudflare-Datenbank. Export als Datei (JSON):</p>
       <div class="row wrap"><a class="btn sm alt" href="/api/export" download>Daten exportieren</a>
       <form method="post" action="/logout"><button class="btn sm danger" type="submit">Abmelden</button></form></div></div>
-    <p class="mute tiny" style="text-align:center">Fitness v0.7.6</p>`;
+    <p class="mute tiny" style="text-align:center">Fitness v0.7.7</p>`;
   const saveStatus = async (status) => { try { await saveSettings({ status }); toast("Gespeichert"); } catch (e) { toast(e.message); } render(); };
   $app.querySelectorAll("[data-sick]").forEach(c => c.addEventListener("click", () => {
     const n = JSON.parse(JSON.stringify(st)), k = c.dataset.sick;
@@ -1206,7 +1210,7 @@ function viewHealthSetup() {
         ${step(1, "Automation anlegen", "Kurzbefehle → <b>Automation</b> → <b>+</b> → <b>Apple Watch-Training</b> → <b>Endet</b> → Training wählen (z. B. <b>Traditionelles Krafttraining</b>) → <b>Sofort ausführen</b> → <b>Weiter</b> → <b>Neue leere Automation</b>.")}
         ${step(2, "Inhalte von URL abrufen", `URL wie oben (…/api/import) · Methode <b>POST</b> · Header <b>Authorization</b> = dein Schlüssel · Anfragetext: <b>JSON</b> → Feld hinzufügen → <b>Text</b>: Schlüssel <b>training</b>, Wert <b>Krafttraining</b>.`)}
         ${step(3, "Kurzbefehl ausführen", `Kurzbefehl <b>„${SHORTCUT_NAME}“</b> – damit kommen Puls und Energie gleich mit.`)}
-        ${step(4, "Für Core-Training wiederholen", "Gleiche Automation, Training <b>Core-Training</b>, Wert <b>Core-Training</b>.")}
+        ${step(4, "Für weitere Trainings wiederholen", "Gleiche Automation, z. B. Training <b>Core-Training</b> → Wert <b>Core-Training</b>, oder <b>Gehen (Outdoor)</b> → Wert <b>Gehen</b>.")}
       </ol>
       <p class="mute small" style="margin:8px 0 0">Nach dem Training erscheint es auf der Startseite mit Dauer und Puls – ein Tipp trägt es als erledigt ein.</p></div>
 
