@@ -182,7 +182,7 @@ await page.evaluate(async () => {
   await L({ id: today + "-main", date: today, kind: "run", status: "done", data: { run: "interval", min: 40, km: 6.6, hr: 142, feel: 3, note: "Lief gut", health: "w_" + "e".repeat(16) } });
 });
 await page.goto(base + "/#/heute"); await page.waitForSelector(".hero"); await page.reload(); await page.waitForSelector(".hero");
-if (!(await page.textContent(".hero")).includes("6,6 km")) fail("Ergebnis fehlt in der Tageskarte");
+if (!(await page.textContent(".hero")).includes("40 Min.")) fail("Ergebnis fehlt in der Tageskarte");
 if (!(await page.$(".hero.open"))) await page.click("#heroToggle");
 await page.waitForSelector(".hero.open"); await shot("26d-ergebnis");
 await page.goto(base + "/#/heute"); await page.waitForSelector(".gitem");
