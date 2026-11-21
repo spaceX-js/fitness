@@ -178,3 +178,16 @@ test("Watch: einzelne Messung nach dem Training stört nicht, erkanntes Training
   assert.equal(out.removed.length, 0); assert.equal(out.workouts.filter(x => x.id.startsWith("w_")).length, 0);
   assert.deepEqual(processUpload(noHr, null, { marks, known: [{ id: "w_" + "f".repeat(16), source: "Apple Watch (geschätzt)" }] }).removed, ["w_" + "f".repeat(16)]);
 });
+
+test("Watch: echte Messungen – minutengenau, Meldung 14 Min. nach dem Ende, Pause dazwischen", async () => {
+  const { processUpload } = await import("../public/health.js");
+  const p = (d, t) => `20.11.2026, ${t}`, hr = [], st = [];
+  for (let m = 29; m <= 41; m++) for (let q = 0; q < (m === 41 ? 8 : 12); q++) { hr.push(80 + (q % 5)); st.push(p(0, "12:" + String(m).padStart(2, "0"))); }   // 12:29–12:41 dicht
+  for (const [t, v] of [["12:15", 70], ["12:42", 72.4], ["12:46", 74.8], ["12:47", 75.2], ["12:52", 71], ["12:53", 74.3], ["12:55", 70.7], ["13:00", 76]]) { hr.push(v); st.push(p(0, t)); }
+  const text = JSON.stringify({ typ: "Heart Rate", werte: hr.join("\n"), start: st.join("\n") });
+  const marks = [{ id: "1".repeat(16), kind: "Core-Training", end: "2026-11-20T11:38:20.311Z" }, { id: "2".repeat(16), kind: "Core-Training", end: "2026-11-20T11:55:22.499Z" }];
+  const out = processUpload(text, null, { marks });
+  const w = out.workouts.filter(x => x.id.startsWith("w_"));
+  assert.equal(w.length, 1, JSON.stringify(w)); assert.equal(w[0].min, 13); assert.equal(w[0].start, "2026-11-20T11:29:00.000Z");
+  assert.ok(w[0].zones[0] > 700, "Zonenzeit über die Minuten verteilt: " + w[0].zones);
+});

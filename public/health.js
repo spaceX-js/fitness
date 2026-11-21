@@ -319,6 +319,11 @@ export function aggregate(items0, opts = {}) {
     wlist = wlist.filter(w => w.e - w.s >= 480000);
   }
   const hrSorted = (samples.hr || []).map(x => ({ s: x.s, bpm: num("hr", x) })).filter(x => Number.isFinite(x.bpm)).sort((a, b) => a.s - b.s);
+  for (let i = 0; i < hrSorted.length;) {   // Zeitangaben sind nur minutengenau: Messungen derselben Minute gleichmäßig verteilen
+    let k = i; while (k < hrSorted.length && hrSorted[k].s === hrSorted[i].s) k++;
+    const n = k - i; if (n > 1 && hrSorted[i].s % 60000 === 0) for (let q = 0; q < n; q++) hrSorted[i + q].s += Math.floor(q * 60000 / n);
+    i = k;
+  }
   const recov = (samples.hr_recovery || []).map(x => ({ s: x.s, v: num("hr_recovery", x) })).filter(x => Number.isFinite(x.v));
   const addHr = (wo, parts) => {
     const st = hrStats(hrSorted, parts);
@@ -347,12 +352,20 @@ export function aggregate(items0, opts = {}) {
     let j = -1;
     for (let k = hrAll.length - 1; k >= 0; k--) if (hrAll[k].s <= end + 180000) { j = k; break; }
     let start = null, endT = end, est = false;
-    // Den dichten Pulsblock suchen, der bis kurz vor die Meldung reicht (einzelne Messungen danach überspringen)
-    for (let jj = j; jj >= 0 && hrAll[jj].s >= end - 10 * 60000 && start == null; jj--) {
-      const eT = Math.max(hrAll[jj].s, Math.min(end, hrAll[jj].e));
-      let k = jj;
-      while (k > 0 && hrAll[k].s - hrAll[k - 1].s <= 180000 && end - hrAll[k - 1].s <= 3 * 3600000) k--;
-      if (eT - hrAll[k].s >= 300000) { start = hrAll[k].s; endT = eT; }
+    // Während eines Trainings misst die Watch etwa alle 5 s (Zeitangaben nur minutengenau → viele Messungen pro Minute),
+    // sonst nur alle paar Minuten. Gesucht wird der letzte dichte Block, der bis zu 30 Min. vor der Meldung endet
+    // (die Meldung kommt teils erst nach dem Abgleich Watch → iPhone, also deutlich später).
+    {
+      const M = 60000, cnt = new Map();
+      for (const x of hrAll) if (x.s >= end - 4 * 3600000 && x.s <= end + 3 * M) { const k = Math.floor(x.s / M); cnt.set(k, (cnt.get(k) || 0) + 1); }
+      const dense = k => (cnt.get(k) || 0) >= 4;
+      let last = null;
+      for (let k = Math.floor((end + 3 * M) / M); k >= Math.floor((end - 30 * M) / M); k--) if (dense(k)) { last = k; break; }
+      if (last != null) {
+        let first = last;
+        while (dense(first - 1) || dense(first - 2)) first -= dense(first - 1) ? 1 : 2;   // eine Minute Lücke erlaubt
+        if (last + 1 - first >= 4) { start = first * M; endT = (last + 1) * M; }
+      }
     }
     if (start == null) {
       // Puls nach dem Ende vorhanden, aber kein Trainingsblock: abgebrochenes/verworfenes Training (Watch meldet trotzdem „beendet“)
